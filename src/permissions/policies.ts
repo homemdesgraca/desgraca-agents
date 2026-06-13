@@ -23,6 +23,9 @@ export function summarizeToolInput(toolName: string, input: unknown): string {
 	if (toolName === "read" || toolName === "write" || toolName === "edit" || toolName === "ls") {
 		return String(data.path ?? data.file_path ?? "").slice(0, 180);
 	}
+	if (toolName === "agent_write_proposal" || toolName === "agent_edit_proposal") {
+		return String(data.originalPath ?? "").slice(0, 180);
+	}
 	if (toolName === "grep") return `${String(data.pattern ?? "")} in ${String(data.path ?? ".")}`.slice(0, 180);
 	if (toolName === "find") return `${String(data.pattern ?? "*")} in ${String(data.path ?? ".")}`.slice(0, 180);
 	try {

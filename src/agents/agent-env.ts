@@ -1,6 +1,7 @@
 export const AGENT_JOB_ID_ENV = "DESGRACA_AGENT_JOB_ID";
 export const AGENT_NAME_ENV = "DESGRACA_AGENT_NAME";
 export const AGENT_WRITABLE_ROOT_ENV = "DESGRACA_AGENT_WRITABLE_ROOT";
+export const AGENT_SETTINGS_ENV = "DESGRACA_AGENT_SETTINGS";
 
 export interface AgentProcessEnvContext {
 	id: string;

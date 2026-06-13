@@ -12,7 +12,9 @@ const piNodeModules = "/usr/lib/node_modules/pi/node_modules";
 const compiledRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "desgraca-agents-tests-"));
 const sourceNodeModules = path.join(projectRoot, "node_modules");
 const sourceEarendil = path.join(sourceNodeModules, "@earendil-works");
+const sourceTypebox = path.join(sourceNodeModules, "typebox");
 let hadSourceEarendil = false;
+let hadSourceTypebox = false;
 let hadSourceNodeModules = false;
 
 async function ensurePiNodeModulesLink(root) {
@@ -24,6 +26,12 @@ async function ensurePiNodeModulesLink(root) {
 		await fsp.rm(link, { recursive: true, force: true });
 	} catch {}
 	await fsp.symlink(path.join(piNodeModules, "@earendil-works"), link, "dir");
+	const typeboxLink = path.join(target, "typebox");
+	try {
+		await fsp.lstat(typeboxLink);
+		await fsp.rm(typeboxLink, { recursive: true, force: true });
+	} catch {}
+	await fsp.symlink(path.join(piNodeModules, "typebox"), typeboxLink, "dir");
 }
 
 async function importCompiled(relativePath) {
@@ -33,9 +41,14 @@ async function importCompiled(relativePath) {
 before(async () => {
 	hadSourceNodeModules = fs.existsSync(sourceNodeModules);
 	hadSourceEarendil = fs.existsSync(sourceEarendil);
+	hadSourceTypebox = fs.existsSync(sourceTypebox);
 	if (!hadSourceEarendil) {
 		await fsp.mkdir(sourceNodeModules, { recursive: true });
 		await fsp.symlink(path.join(piNodeModules, "@earendil-works"), sourceEarendil, "dir");
+	}
+	if (!hadSourceTypebox) {
+		await fsp.mkdir(sourceNodeModules, { recursive: true });
+		await fsp.symlink(path.join(piNodeModules, "typebox"), sourceTypebox, "dir");
 	}
 
 	execFileSync(
@@ -60,6 +73,7 @@ before(async () => {
 			"src/agents/agent-job.ts",
 			"src/agents/agent-runner.ts",
 			"src/agents/agent-store.ts",
+			"src/agents/proposal-tools.ts",
 			"src/dashboard/Dashboard.ts",
 			"src/dashboard/keybindings.ts",
 			"src/dashboard/render.ts",
@@ -78,7 +92,9 @@ after(async () => {
 	delete process.env.DESGRACA_AGENT_JOB_ID;
 	delete process.env.DESGRACA_AGENT_NAME;
 	delete process.env.DESGRACA_AGENT_WRITABLE_ROOT;
+	delete process.env.DESGRACA_AGENT_SETTINGS;
 	if (!hadSourceEarendil) await fsp.rm(sourceEarendil, { recursive: true, force: true });
+	if (!hadSourceTypebox) await fsp.rm(sourceTypebox, { recursive: true, force: true });
 	if (!hadSourceNodeModules) await fsp.rm(sourceNodeModules, { recursive: true, force: true });
 	await fsp.rm(compiledRoot, { recursive: true, force: true });
 });
@@ -94,7 +110,9 @@ describe("blank-slate MVP foundations", () => {
 		assert.equal(settings.toolPolicies.bash, "ask");
 		assert.equal(settings.toolPolicies.write, "ask");
 		assert.equal(settings.toolPolicies.edit, "ask");
-		assert.deepEqual(settings.childRunnerTools, ["read", "grep", "find", "ls", "write"]);
+		assert.equal(settings.toolPolicies.agent_write_proposal, "allow");
+		assert.equal(settings.toolPolicies.agent_edit_proposal, "allow");
+		assert.deepEqual(settings.childRunnerTools, ["read", "grep", "find", "ls", "write", "agent_write_proposal", "agent_edit_proposal"]);
 	});
 
 	test("agent jobs are sanitized and isolated under .agents", async () => {
@@ -107,7 +125,7 @@ describe("blank-slate MVP foundations", () => {
 			assert.equal(job.readableRoot, path.resolve(cwd));
 			assert.equal(job.writableRoot, path.join(cwd, ".agents", "module-x-worker"));
 			assert.equal(job.status, "draft");
-			assert.deepEqual(job.allowedTools, ["read", "grep", "find", "ls", "write"]);
+			assert.deepEqual(job.allowedTools, ["read", "grep", "find", "ls", "write", "agent_write_proposal", "agent_edit_proposal"]);
 		} finally {
 			await fsp.rm(cwd, { recursive: true, force: true });
 		}
@@ -177,12 +195,14 @@ describe("blank-slate MVP foundations", () => {
 		const cwd = await fsp.mkdtemp(path.join(os.tmpdir(), "artifacts-"));
 		try {
 			const job = createAgentJob(cwd, "artifact worker", "produce notes");
-			await fsp.mkdir(path.join(job.writableRoot, "nested"), { recursive: true });
-			await fsp.writeFile(path.join(job.writableRoot, "nested", "notes.md"), "hello");
+			await fsp.mkdir(path.join(job.writableRoot, "proposals", "nested"), { recursive: true });
+			await fsp.writeFile(path.join(job.writableRoot, "proposals", "nested", "notes.md"), "hello");
 			await fsp.writeFile(path.join(cwd, "main-project.txt"), "must not be listed");
 			const artifacts = await discoverArtifacts(job);
-			assert.deepEqual(artifacts.map((artifact) => artifact.path), [path.join(".agents", "artifact-worker", "nested", "notes.md")]);
+			assert.deepEqual(artifacts.map((artifact) => artifact.path), [path.join(".agents", "artifact-worker", "proposals", "nested", "notes.md")]);
 			assert.equal(artifacts[0].sizeBytes, 5);
+			assert.equal(artifacts[0].kind, "proposal");
+			assert.equal(artifacts[0].originalPath, path.join("nested", "notes.md"));
 		} finally {
 			await fsp.rm(cwd, { recursive: true, force: true });
 		}
@@ -212,46 +232,90 @@ describe("blank-slate MVP foundations", () => {
 			job.artifacts.push({
 				id: "artifact-1",
 				agentId: job.id,
-				path: path.join(".agents", job.name, "notes.md"),
+				path: path.join(".agents", job.name, "proposals", "notes.md"),
 				absolutePath: artifactPath,
 				sizeBytes: 17,
 				updatedAt: Date.now(),
+				kind: "proposal",
+				originalPath: "notes.md",
 			});
 			assert.match(renderJobList([job], job.id, 100).join("\n"), /approvals:1/);
 			assert.match(renderApprovals(job, 100).join("\n"), /Warning: rm detected/);
-			assert.match(renderArtifacts(job, 100).join("\n"), /notes\.md/);
+			assert.match(renderArtifacts(job, 100).join("\n"), /original: notes\.md/);
 			assert.match(renderArtifactContent(job.artifacts[0], 100).join("\n"), /line two/);
 			assert.match(renderHelp(120).join("\n"), /C create/);
+			assert.match(renderHelp(120).join("\n"), /still selects agents/);
 			assert.deepEqual(parseDashboardAction("D"), { type: "artifacts" });
 			assert.deepEqual(parseDashboardAction("3"), { type: "select", index: 2 });
+			assert.deepEqual(parseDashboardAction("["), { type: "artifactPrevious" });
+			assert.deepEqual(parseDashboardAction("]"), { type: "artifactNext" });
+			assert.deepEqual(parseDashboardAction("O"), { type: "artifactOpen" });
 		} finally {
 			await fsp.rm(cwd, { recursive: true, force: true });
 		}
 	});
 
-	test("extension registers dashboard commands and ignores non-agent tool calls", async () => {
+	test("extension registers dashboard commands and keeps agent tools out of ordinary conversations", async () => {
 		const extension = (await importCompiled("index.js")).default;
 		const commands = new Map();
 		const handlers = new Map();
+		const tools = new Map();
 		const entries = [];
+		delete process.env.DESGRACA_AGENT_JOB_ID;
+		delete process.env.DESGRACA_AGENT_NAME;
+		delete process.env.DESGRACA_AGENT_WRITABLE_ROOT;
 		extension({
 			on: (name, handler) => handlers.set(name, handler),
 			registerCommand: (name, spec) => commands.set(name, spec),
+			registerTool: (spec) => tools.set(spec.name, spec),
 			appendEntry: (type, data) => entries.push({ type, data }),
 		});
 		assert.ok(commands.has("agents"));
 		assert.ok(commands.has("agent-settings"));
 		assert.ok(commands.has("agent-policy-cycle"));
 		assert.ok(handlers.has("tool_call"));
+		assert.equal(tools.has("agent_write_proposal"), false);
+		assert.equal(tools.has("agent_edit_proposal"), false);
 
-		delete process.env.DESGRACA_AGENT_JOB_ID;
-		delete process.env.DESGRACA_AGENT_NAME;
-		delete process.env.DESGRACA_AGENT_WRITABLE_ROOT;
 		const result = await handlers.get("tool_call")({ toolName: "write", input: { path: "main.txt" } }, { cwd: projectRoot });
 		assert.equal(result, undefined);
 	});
 
-	test("agent-scoped writes inside the writable root are allowed without child UI", async () => {
+	test("extension registers proposal tools only in marked agent subprocess contexts", async () => {
+		const extension = (await importCompiled("index.js")).default;
+		const tools = new Map();
+		const cwd = await fsp.mkdtemp(path.join(os.tmpdir(), "extension-tools-"));
+		try {
+			process.env.DESGRACA_AGENT_JOB_ID = "agent-1";
+			process.env.DESGRACA_AGENT_NAME = "proposal-worker";
+			process.env.DESGRACA_AGENT_WRITABLE_ROOT = path.join(cwd, ".agents", "proposal-worker");
+			extension({
+				on: () => {},
+				registerCommand: () => {},
+				registerTool: (spec) => tools.set(spec.name, spec),
+				appendEntry: () => {},
+			});
+			assert.ok(tools.has("agent_write_proposal"));
+			assert.ok(tools.has("agent_edit_proposal"));
+
+			await fsp.mkdir(path.join(cwd, "src"), { recursive: true });
+			await fsp.writeFile(path.join(cwd, "src", "file.ts"), "const value = 1;\n");
+			await tools.get("agent_write_proposal").execute("tool-1", { originalPath: "src/new.ts", content: "export const value = 2;\n" }, undefined, undefined, { cwd });
+			assert.equal(await fsp.readFile(path.join(cwd, ".agents", "proposal-worker", "proposals", "src", "new.ts"), "utf8"), "export const value = 2;\n");
+			assert.equal(fs.existsSync(path.join(cwd, "src", "new.ts")), false);
+
+			await tools.get("agent_edit_proposal").execute("tool-2", { originalPath: "src/file.ts", edits: [{ oldText: "const value = 1;", newText: "const value = 3;" }] }, undefined, undefined, { cwd });
+			assert.equal(await fsp.readFile(path.join(cwd, ".agents", "proposal-worker", "proposals", "src", "file.ts"), "utf8"), "const value = 3;\n");
+			assert.equal(await fsp.readFile(path.join(cwd, "src", "file.ts"), "utf8"), "const value = 1;\n");
+		} finally {
+			delete process.env.DESGRACA_AGENT_JOB_ID;
+			delete process.env.DESGRACA_AGENT_NAME;
+			delete process.env.DESGRACA_AGENT_WRITABLE_ROOT;
+			await fsp.rm(cwd, { recursive: true, force: true });
+		}
+	});
+
+	test("agent proposal tools are allowed by default without child UI", async () => {
 		const extension = (await importCompiled("index.js")).default;
 		const handlers = new Map();
 		extension({
@@ -264,9 +328,33 @@ describe("blank-slate MVP foundations", () => {
 			process.env.DESGRACA_AGENT_JOB_ID = "agent-1";
 			process.env.DESGRACA_AGENT_NAME = "scope-worker";
 			process.env.DESGRACA_AGENT_WRITABLE_ROOT = path.join(cwd, ".agents", "scope-worker");
+			const result = await handlers.get("tool_call")({ toolName: "agent_write_proposal", input: { originalPath: "src/file.ts" } }, { cwd, hasUI: false });
+			assert.equal(result, undefined);
+		} finally {
+			delete process.env.DESGRACA_AGENT_JOB_ID;
+			delete process.env.DESGRACA_AGENT_NAME;
+			delete process.env.DESGRACA_AGENT_WRITABLE_ROOT;
+			await fsp.rm(cwd, { recursive: true, force: true });
+		}
+	});
+
+	test("generic agent writes inside the writable root still follow policy without child UI", async () => {
+		const extension = (await importCompiled("index.js")).default;
+		const handlers = new Map();
+		extension({
+			on: (name, handler) => handlers.set(name, handler),
+			registerCommand: () => {},
+			appendEntry: () => {},
+		});
+		const cwd = await fsp.mkdtemp(path.join(os.tmpdir(), "extension-write-policy-"));
+		try {
+			process.env.DESGRACA_AGENT_JOB_ID = "agent-1";
+			process.env.DESGRACA_AGENT_NAME = "scope-worker";
+			process.env.DESGRACA_AGENT_WRITABLE_ROOT = path.join(cwd, ".agents", "scope-worker");
 			const input = { path: path.join(cwd, ".agents", "scope-worker", "notes.md") };
 			const result = await handlers.get("tool_call")({ toolName: "write", input }, { cwd, hasUI: false });
-			assert.equal(result, undefined);
+			assert.equal(result?.block, true);
+			assert.match(result?.reason ?? "", /No UI is available/);
 			assert.equal(input.path, path.join(cwd, ".agents", "scope-worker", "notes.md"));
 		} finally {
 			delete process.env.DESGRACA_AGENT_JOB_ID;

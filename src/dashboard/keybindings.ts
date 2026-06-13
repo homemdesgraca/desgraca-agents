@@ -16,6 +16,9 @@ export type DashboardAction =
 	| { type: "refresh" }
 	| { type: "delete" }
 	| { type: "message" }
+	| { type: "artifactPrevious" }
+	| { type: "artifactNext" }
+	| { type: "artifactOpen" }
 	| { type: "scrollUp" }
 	| { type: "scrollDown" };
 
@@ -34,6 +37,9 @@ export function parseDashboardAction(input: string): DashboardAction | undefined
 	if (input === "p" || input === "P") return { type: "approvals" };
 	if (input === "d" || input === "D") return { type: "artifacts" };
 	if (input === "h" || input === "H" || input === "?") return { type: "help" };
+	if (input === "[") return { type: "artifactPrevious" };
+	if (input === "]") return { type: "artifactNext" };
+	if (input === "o" || input === "O") return { type: "artifactOpen" };
 	if (matchesKey(input, "enter")) return { type: "normal" };
 	if (matchesKey(input, "delete") || matchesKey(input, "backspace")) return { type: "delete" };
 	if (matchesKey(input, "up")) return { type: "scrollUp" };

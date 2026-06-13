@@ -43,6 +43,8 @@ export interface AgentArtifact {
 	absolutePath: string;
 	sizeBytes: number;
 	updatedAt: number;
+	kind?: "artifact" | "proposal";
+	originalPath?: string;
 }
 
 export interface AgentModelSelection {
@@ -114,7 +116,7 @@ export function createAgentJob(cwd: string, name: string, task: string, model?: 
 		task: task.trim(),
 		model,
 		status: "draft",
-		allowedTools: ["read", "grep", "find", "ls", "write"],
+		allowedTools: ["read", "grep", "find", "ls", "write", "agent_write_proposal", "agent_edit_proposal"],
 		readableRoot: path.resolve(cwd),
 		writableRoot: getAgentWritableRoot(cwd, safeName),
 		logs: [

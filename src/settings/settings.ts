@@ -14,12 +14,14 @@ export const DEFAULT_TOOL_POLICIES: Record<string, ToolPolicy> = {
 	bash: "ask",
 	write: "ask",
 	edit: "ask",
+	agent_write_proposal: "allow",
+	agent_edit_proposal: "allow",
 };
 
 export function createDefaultSettings(): AgentExtensionSettings {
 	return {
 		toolPolicies: { ...DEFAULT_TOOL_POLICIES },
-		childRunnerTools: ["read", "grep", "find", "ls", "write"],
+		childRunnerTools: ["read", "grep", "find", "ls", "write", "agent_write_proposal", "agent_edit_proposal"],
 		taskWorkspaceDir: ".agents",
 	};
 }

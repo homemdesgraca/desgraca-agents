@@ -13,7 +13,7 @@
 The `/agents` screen uses a tall bordered, theme-aware dashboard with an agent list pane, agent description pane, mode tabs, and wrapped footer hints. Press `H` for descriptive help that explains what each dashboard mode shows.
 
 - `C` create a new job with empty name/task fields and a selectable worker model; `Esc` or `Ctrl+C` cancels and returns to the dashboard.
-- `1`-`9` select an agent job.
+- `1`-`9` select an agent job in every dashboard mode.
 - `Up` / `Down` scroll the right-hand panel when there is more content than visible space.
 - `S` start the selected job.
 - `X` abort the selected job.
@@ -24,7 +24,7 @@ The `/agents` screen uses a tall bordered, theme-aware dashboard with an agent l
 - `L` show TRACKING: a readable timeline of user messages, worker responses, status changes, tool activity, and final response output.
 - `M` send a follow-up message to the selected agent from TRACKING, including after it is `FINISHED`.
 - `P` show approvals.
-- `D` show artifacts; in artifact mode, `1`-`9` previews an artifact.
+- `D` show artifacts; in artifact mode, `[` and `]` move between artifacts and `O` previews the selected artifact.
 - `R` refresh artifacts.
 - `H` show help.
 - `Q` or `Esc` close the dashboard.
@@ -37,10 +37,10 @@ Each job may read from the current pi working directory. Job-owned writable outp
 .agents/{AGENT_NAME}
 ```
 
-Each workspace includes `agent-job.json`, which persists the job metadata, logs, approvals, artifacts, selected model, and final response so jobs survive reopening `/agents` or starting a new pi session. Worker agents may read/search the main project and may write reviewable artifacts under their own `.agents/{AGENT_NAME}` workspace only. Generated work is not applied automatically to the main project.
+Each workspace includes `agent-job.json`, which persists the job metadata, logs, approvals, artifacts, selected model, and final response so jobs survive reopening `/agents` or starting a new pi session. Worker agents may read/search the main project and may write reviewable artifacts under their own `.agents/{AGENT_NAME}` workspace only. Project-file change proposals are written under `.agents/{AGENT_NAME}/proposals/{ORIGINAL_PATH}`, mirroring the original project structure. Generated work is not applied automatically to the main project.
 
 ## Permission defaults
 
 These permission policies are agent-scoped only. `desgraca-agents` does not intercept or approve normal plain-LLM tool calls in the parent pi session; those should remain owned by your regular approval extensions or pi configuration.
 
-For marked agent subprocesses, read/search tools are allowed by default. `write` is available for isolated workspace artifacts and asks for approval by default. `bash` and `edit` also ask for approval by default if they are enabled for an agent. Simple bash warnings are surfaced for patterns such as `rm`, `curl`, `wget`, `sudo`, `chmod`, `chown`, `kill`, and shell redirection.
+For marked agent subprocesses, read/search tools are allowed by default. The agent-only `agent_write_proposal` and `agent_edit_proposal` tools are allowed by default after scope validation because they only write isolated proposals under the worker workspace. These agent-only tools are registered only inside marked agent subprocesses, so ordinary parent pi conversations cannot see or call them. Generic `write`, `edit`, and `bash` remain policy-controlled sensitive tools. Simple bash warnings are surfaced for patterns such as `rm`, `curl`, `wget`, `sudo`, `chmod`, `chown`, `kill`, and shell redirection.

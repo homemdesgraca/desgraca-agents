@@ -2,10 +2,11 @@ import * as fs from "node:fs/promises";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getSettingsListTheme } from "@earendil-works/pi-coding-agent";
 import { Container, type SettingItem, SettingsList, Text } from "@earendil-works/pi-tui";
-import { getAgentProcessEnvContext } from "./src/agents/agent-env.ts";
+import { AGENT_SETTINGS_ENV, getAgentProcessEnvContext } from "./src/agents/agent-env.ts";
 import type { AgentModelSelection } from "./src/agents/agent-job.ts";
 import { AgentStore } from "./src/agents/agent-store.ts";
 import { PiSubprocessAgentRunner } from "./src/agents/agent-runner.ts";
+import { registerAgentProposalTools } from "./src/agents/proposal-tools.ts";
 import { CreateJobDialog, type CreateJobDialogResult } from "./src/dashboard/create-job-dialog.ts";
 import { Dashboard } from "./src/dashboard/Dashboard.ts";
 import { DeleteAgentDialog } from "./src/dashboard/delete-agent-dialog.ts";
@@ -15,6 +16,17 @@ import { checkAgentReadScope, checkAgentWriteScope } from "./src/permissions/sco
 import { createDefaultSettings, cycleToolPolicy, knownPolicyTools, setToolPolicy, type AgentExtensionSettings, type ToolPolicy } from "./src/settings/settings.ts";
 
 const SETTINGS_ENTRY = "desgraca-agents-settings";
+const PROPOSAL_TOOL_NAMES = ["agent_write_proposal", "agent_edit_proposal"];
+
+function normalizeSettings(saved: Partial<AgentExtensionSettings> = {}): AgentExtensionSettings {
+	const defaults = createDefaultSettings();
+	return {
+		...defaults,
+		...saved,
+		toolPolicies: { ...defaults.toolPolicies, ...(saved.toolPolicies ?? {}) },
+		childRunnerTools: Array.from(new Set([...(saved.childRunnerTools ?? defaults.childRunnerTools), ...PROPOSAL_TOOL_NAMES])),
+	};
+}
 
 function getCreatableAgentModels(ctx: ExtensionContext): AgentModelSelection[] {
 	const models = ctx.modelRegistry.getAvailable().map((model) => ({ provider: model.provider, id: model.id, label: `${model.provider}/${model.id}` }));
@@ -71,22 +83,27 @@ export default function desgracaAgentsExtension(pi: ExtensionAPI) {
 	const store = new AgentStore();
 	let settings: AgentExtensionSettings = createDefaultSettings();
 	const runner = new PiSubprocessAgentRunner(store, () => settings);
+	const agentProcessContext = getAgentProcessEnvContext();
+	if (agentProcessContext) registerAgentProposalTools(pi);
 
 	function persistSettings(): void {
 		pi.appendEntry<AgentExtensionSettings>(SETTINGS_ENTRY, settings);
 	}
 
 	function restoreSettings(ctx: ExtensionContext): void {
+		const envSettings = process.env[AGENT_SETTINGS_ENV];
+		if (envSettings) {
+			try {
+				settings = normalizeSettings(JSON.parse(envSettings) as Partial<AgentExtensionSettings>);
+				return;
+			} catch {
+				settings = createDefaultSettings();
+				return;
+			}
+		}
 		for (const entry of ctx.sessionManager.getBranch()) {
 			if (entry.type === "custom" && entry.customType === SETTINGS_ENTRY && entry.data) {
-				const saved = entry.data as Partial<AgentExtensionSettings>;
-				const defaults = createDefaultSettings();
-				settings = {
-					...defaults,
-					...saved,
-					toolPolicies: { ...defaults.toolPolicies, ...(saved.toolPolicies ?? {}) },
-					childRunnerTools: saved.childRunnerTools ?? defaults.childRunnerTools,
-				};
+				settings = normalizeSettings(entry.data as Partial<AgentExtensionSettings>);
 			}
 		}
 	}
@@ -115,11 +132,6 @@ export default function desgracaAgentsExtension(pi: ExtensionAPI) {
 				store.appendLog(selected.id, scopeViolation.reason, "error");
 			}
 			return scopeViolation;
-		}
-
-		if (event.toolName === "write") {
-			if (selected) store.appendLog(selected.id, "Workspace-scoped write allowed for isolated artifact output.", "debug");
-			return;
 		}
 
 		const decision = decideToolPolicy(settings, event.toolName, event.input, scopedAgent);
@@ -256,7 +268,7 @@ export default function desgracaAgentsExtension(pi: ExtensionAPI) {
 			await ctx.ui.custom((_tui, theme, _kb, done) => {
 				const container = new Container();
 				container.addChild(new Text(theme.fg("accent", theme.bold("desgraca-agents permission settings")), 1, 0));
-				container.addChild(new Text(theme.fg("dim", "Toggle policies between allow, ask, and deny. Defaults ask for bash/write/edit."), 1, 0));
+				container.addChild(new Text(theme.fg("dim", "Toggle policies between allow, ask, and deny. Proposal tools are agent-only; bash/write/edit remain sensitive."), 1, 0));
 				const items: SettingItem[] = tools.map((tool) => ({
 					id: tool,
 					label: tool,

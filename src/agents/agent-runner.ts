@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import * as fs from "node:fs/promises";
 import * as fsSync from "node:fs";
 import * as path from "node:path";
-import { AGENT_JOB_ID_ENV, AGENT_NAME_ENV, AGENT_WRITABLE_ROOT_ENV } from "./agent-env.ts";
+import { AGENT_JOB_ID_ENV, AGENT_NAME_ENV, AGENT_SETTINGS_ENV, AGENT_WRITABLE_ROOT_ENV } from "./agent-env.ts";
 import type { AgentArtifact, AgentJob } from "./agent-job.ts";
 import { createId } from "./agent-job.ts";
 import type { AgentStore } from "./agent-store.ts";
@@ -40,6 +40,11 @@ async function ensureDirectory(dir: string): Promise<void> {
 	await fs.mkdir(dir, { recursive: true });
 }
 
+function getRunnableTools(job: AgentJob, settings: AgentExtensionSettings): string[] {
+	const configured = job.allowedTools.length > 0 ? job.allowedTools : settings.childRunnerTools;
+	return Array.from(new Set(configured)).filter((tool) => settings.toolPolicies[tool] !== "deny");
+}
+
 async function walkFiles(root: string, cwd: string, agentId: string): Promise<AgentArtifact[]> {
 	const artifacts: AgentArtifact[] = [];
 	async function walk(current: string): Promise<void> {
@@ -58,6 +63,9 @@ async function walkFiles(root: string, cwd: string, agentId: string): Promise<Ag
 			}
 			if (!entry.isFile()) continue;
 			const stat = await fs.stat(absolutePath);
+			const relativeToWorkspace = path.relative(root, absolutePath);
+			const isProposal = relativeToWorkspace === "proposals" || relativeToWorkspace.startsWith(`proposals${path.sep}`);
+			const originalPath = isProposal ? path.relative("proposals", relativeToWorkspace) : undefined;
 			artifacts.push({
 				id: createId(),
 				agentId,
@@ -65,6 +73,8 @@ async function walkFiles(root: string, cwd: string, agentId: string): Promise<Ag
 				absolutePath,
 				sizeBytes: stat.size,
 				updatedAt: stat.mtimeMs,
+				kind: isProposal ? "proposal" : "artifact",
+				originalPath,
 			});
 		}
 	}
@@ -112,7 +122,7 @@ export class PiSubprocessAgentRunner implements AgentRunner {
 
 		await ensureDirectory(job.writableRoot);
 		const settings = this.getSettings();
-		const safeTools = (job.allowedTools.length > 0 ? job.allowedTools : settings.childRunnerTools).join(",");
+		const safeTools = getRunnableTools(job, settings).join(",");
 		const prompt = this.buildPrompt(job, followUp);
 
 		const modelArgs = job.model ? ["--model", `${job.model.provider}/${job.model.id}`] : [];
@@ -140,6 +150,7 @@ export class PiSubprocessAgentRunner implements AgentRunner {
 				[AGENT_JOB_ID_ENV]: job.id,
 				[AGENT_NAME_ENV]: job.name,
 				[AGENT_WRITABLE_ROOT_ENV]: job.writableRoot,
+				[AGENT_SETTINGS_ENV]: JSON.stringify(settings),
 			},
 		});
 		this.running.set(jobId, { process: child, aborted: false });
@@ -205,8 +216,12 @@ export class PiSubprocessAgentRunner implements AgentRunner {
 			`Writable artifact workspace: ${job.writableRoot}`,
 			"You may read/search the main project, but you must not directly modify files in the main project tree.",
 			`You CAN and SHOULD write reviewable artifacts, notes, plans, patch proposals, or generated files inside your isolated writable workspace: ${job.writableRoot}`,
-			"Use the write tool for files in that workspace when a concrete artifact would help the user review your work later. The user will inspect these artifacts before applying anything to the real project.",
-			"If you need to change project code, write a patch/proposal or full replacement file under the isolated workspace instead of editing the main project directly.",
+			"Use agent_write_proposal when you need to create a full-file proposal for an original project file. Provide only originalPath and content; the tool writes to the correct .agents proposals path automatically.",
+			"Use agent_edit_proposal when you need to derive a proposal from an existing project file with exact oldText/newText replacements. It reads the original, writes an isolated proposal, and never mutates the project file.",
+			"Proposal files are stored under .agents/{AGENT_NAME}/proposals/ with the original project structure mirrored beneath it.",
+			"Use the generic write tool only for non-code artifacts such as notes, plans, summaries, or scratch files inside your workspace, and only when the active agent policy allows it.",
+			"The user will inspect these artifacts before applying anything to the real project.",
+			"If you need to change project code, create a proposal with agent_write_proposal or agent_edit_proposal instead of editing the main project directly.",
 			"Task:",
 			job.task,
 		];

@@ -282,14 +282,18 @@ function renderApproval(approval: AgentApproval, index: number, width: number, t
 	];
 }
 
-export function renderArtifacts(job: AgentJob | undefined, width: number, theme?: Theme): string[] {
+export function renderArtifacts(job: AgentJob | undefined, width: number, theme?: Theme, selectedIndex = 0): string[] {
 	if (!job) return [clampLine(fg(theme, "dim", "No selected job."), width)];
 	if (job.artifacts.length === 0) return [clampLine(fg(theme, "dim", "No artifacts found under the job workspace."), width)];
-	return job.artifacts.map((artifact, index) => formatArtifact(artifact, index, width, theme));
+	return job.artifacts.map((artifact, index) => formatArtifact(artifact, index, width, theme, index === selectedIndex));
 }
 
-function formatArtifact(artifact: AgentArtifact, index: number, width: number, theme?: Theme): string {
-	return clampLine(`${fg(theme, "accent", `${index + 1}.`)} ${fg(theme, "text", artifact.path)} ${fg(theme, "dim", `(${artifact.sizeBytes} bytes)`)}`, width);
+function formatArtifact(artifact: AgentArtifact, index: number, width: number, theme: Theme | undefined, selected: boolean): string {
+	const pointer = selected ? fg(theme, "accent", ">") : fg(theme, "dim", " ");
+	const kind = artifact.kind === "proposal" ? fg(theme, "warning", "proposal") : fg(theme, "dim", "artifact");
+	const original = artifact.originalPath ? ` ${fg(theme, "dim", "original:")} ${fg(theme, "muted", artifact.originalPath)}` : "";
+	const row = `${pointer} ${kind} ${fg(theme, "text", artifact.path)} ${fg(theme, "dim", `(${artifact.sizeBytes} bytes)`)}${original}`;
+	return selected ? bg(theme, "selectedBg", padLine(row, width)) : clampLine(row, width);
 }
 
 export function renderArtifactContent(artifact: AgentArtifact | undefined, width: number, maxLines = 18, theme?: Theme): string[] {
@@ -329,21 +333,33 @@ function packTokens(tokens: string[], width: number, separator = "  "): string[]
 	return lines.length > 0 ? lines : [""];
 }
 
-export function renderFooterHints(width: number, theme?: Theme): string[] {
-	const hints = [
-		`${key(theme, "C")} create`,
-		`${key(theme, "1-9")} select`,
-		`${key(theme, "S")} start`,
-		`${key(theme, "X")} abort`,
-		`${key(theme, "A/N")} approve/deny`,
-		`${key(theme, "Del")} delete`,
-		`${key(theme, "↑/↓")} scroll`,
-		`${key(theme, "M")} message`,
-		`${key(theme, "L/P/D")} modes`,
-		`${key(theme, "R")} refresh`,
-		`${key(theme, "H")} help`,
-		`${key(theme, "Q/Esc")} close`,
-	];
+export function renderFooterHints(width: number, theme?: Theme, mode: DashboardMode = "normal"): string[] {
+	const hints = mode === "artifacts"
+		? [
+			`${key(theme, "1-9")} agents`,
+			`${key(theme, "[")} previous artifact`,
+			`${key(theme, "]")} next artifact`,
+			`${key(theme, "O")} preview`,
+			`${key(theme, "R")} refresh`,
+			`${key(theme, "↑/↓")} scroll`,
+			`${key(theme, "Enter")} agents mode`,
+			`${key(theme, "H")} help`,
+			`${key(theme, "Q/Esc")} close`,
+		]
+		: [
+			`${key(theme, "C")} create`,
+			`${key(theme, "1-9")} select agent`,
+			`${key(theme, "S")} start`,
+			`${key(theme, "X")} abort`,
+			`${key(theme, "A/N")} approve/deny`,
+			`${key(theme, "Del")} delete`,
+			`${key(theme, "↑/↓")} scroll`,
+			`${key(theme, "M")} message`,
+			`${key(theme, "L/P/D")} modes`,
+			`${key(theme, "R")} refresh`,
+			`${key(theme, "H")} help`,
+			`${key(theme, "Q/Esc")} close`,
+		];
 	return packTokens(hints, width).map((line) => padLine(line, width));
 }
 
@@ -351,7 +367,7 @@ export function renderHelp(width: number, theme?: Theme): string[] {
 	const heading = (text: string) => fg(theme, "toolTitle", bold(theme, text));
 	const lines = [
 		heading("Navigation"),
-		`${key(theme, "1-9")} select an agent job from the left pane. The selected job drives every detail view and action.`,
+		`${key(theme, "1-9")} select an agent job from the left pane. The selected job drives every detail view and action, including ARTIFACTS mode.`,
 		`${key(theme, "↑/↓")} scroll the right-hand panel when its content is longer than the visible dashboard area.`,
 		`${key(theme, "Enter")} returns to agents mode. ${key(theme, "Q/Esc")} closes the dashboard.`,
 		"",
@@ -366,7 +382,7 @@ export function renderHelp(width: number, theme?: Theme): string[] {
 		`${key(theme, "Agents mode")} shows the selected agent's identity, status, readable root, writable root, allowed tools, model, task, final response preview, process state, and recent logs.`,
 		`${key(theme, "Tracking mode")} auto-scrolls as work arrives and shows a readable timeline of user messages, worker responses, status changes, artifact-writing guidance, and detailed tool activity. Use ${key(theme, "M")} to keep talking to a finished worker.`,
 		`${key(theme, "Approvals mode")} shows pending sensitive tool requests for the selected agent, including tool name, input summary, policy reason, and simple risk warnings.`,
-		`${key(theme, "Artifacts mode")} lists files discovered under the selected agent's .agents workspace. Press ${key(theme, "1-9")} in this mode to preview an artifact without applying it to the project.`,
+		`${key(theme, "Artifacts mode")} lists files discovered under the selected agent's .agents workspace. Use ${key(theme, "[")} and ${key(theme, "]")} to move between artifacts and ${key(theme, "O")} to preview the selected artifact without applying it to the project. ${key(theme, "1-9")} still selects agents in this mode.`,
 		`${key(theme, "Help mode")} is this reference view with grouped navigation, job actions, and mode descriptions.`,
 	];
 	return lines.flatMap((line) => (line === "" ? [""] : wrapWords(line, width))).map((line) => clampLine(line, width));

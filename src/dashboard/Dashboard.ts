@@ -36,7 +36,8 @@ export interface DashboardActions {
 
 export class Dashboard implements Component {
 	private mode: DashboardMode = "normal";
-	private artifactPreviewIndex: number | undefined;
+	private artifactPreviewIndex = 0;
+	private artifactPreviewOpen = false;
 	private rightScrollOffset = 0;
 	private notice: { message: string; level: "info" | "warning" | "error" } | undefined;
 	private noticeTimer: ReturnType<typeof setTimeout> | undefined;
@@ -81,8 +82,9 @@ export class Dashboard implements Component {
 		}
 
 		if (action.type === "select") {
-			if (this.mode === "artifacts") this.artifactPreviewIndex = action.index;
-			else this.store.selectByIndex(action.index);
+			this.store.selectByIndex(action.index);
+			this.artifactPreviewIndex = 0;
+			this.artifactPreviewOpen = false;
 			this.rightScrollOffset = 0;
 			this.invalidateAndRender();
 			return;
@@ -118,6 +120,15 @@ export class Dashboard implements Component {
 					this.showNotice(`Deleted agent ${job.name}.`, "info");
 				}
 				break;
+			case "artifactPrevious":
+				this.moveArtifactSelection(-1, job);
+				break;
+			case "artifactNext":
+				this.moveArtifactSelection(1, job);
+				break;
+			case "artifactOpen":
+				this.openSelectedArtifact(job);
+				break;
 			case "message":
 				if (!job) this.showNotice("No selected job.", "warning");
 				else {
@@ -142,7 +153,8 @@ export class Dashboard implements Component {
 				break;
 			case "artifacts":
 				this.mode = "artifacts";
-				this.artifactPreviewIndex = undefined;
+				this.artifactPreviewIndex = 0;
+				this.artifactPreviewOpen = false;
 				this.rightScrollOffset = 0;
 				break;
 			case "help":
@@ -151,7 +163,8 @@ export class Dashboard implements Component {
 				break;
 			case "normal":
 				this.mode = "normal";
-				this.artifactPreviewIndex = undefined;
+				this.artifactPreviewIndex = 0;
+				this.artifactPreviewOpen = false;
 				this.rightScrollOffset = 0;
 				break;
 			case "refresh":
@@ -168,6 +181,34 @@ export class Dashboard implements Component {
 			return;
 		}
 		this.store.resolveApproval(job.id, approval.id, status);
+	}
+
+	private moveArtifactSelection(delta: number, job: AgentJob | undefined): void {
+		if (this.mode !== "artifacts") {
+			this.showNotice("Artifact navigation is only active in ARTIFACTS mode.", "warning");
+			return;
+		}
+		const count = job?.artifacts.length ?? 0;
+		if (count === 0) {
+			this.showNotice("No artifacts to select.", "warning");
+			return;
+		}
+		this.artifactPreviewIndex = (this.artifactPreviewIndex + delta + count) % count;
+		this.rightScrollOffset = 0;
+	}
+
+	private openSelectedArtifact(job: AgentJob | undefined): void {
+		if (this.mode !== "artifacts") {
+			this.showNotice("Artifact preview is only active in ARTIFACTS mode.", "warning");
+			return;
+		}
+		if (!job || job.artifacts.length === 0) {
+			this.showNotice("No artifact selected.", "warning");
+			return;
+		}
+		this.artifactPreviewIndex = Math.min(this.artifactPreviewIndex, job.artifacts.length - 1);
+		this.artifactPreviewOpen = true;
+		this.rightScrollOffset = 0;
 	}
 
 	private async refreshArtifacts(job: AgentJob | undefined): Promise<void> {
@@ -228,10 +269,14 @@ export class Dashboard implements Component {
 		}
 		else if (this.mode === "artifacts") {
 			rightTitleText = "Artifacts";
-			const artifact = selected?.artifacts[this.artifactPreviewIndex ?? -1];
+			const artifactCount = selected?.artifacts.length ?? 0;
+			if (artifactCount > 0) this.artifactPreviewIndex = Math.min(this.artifactPreviewIndex, artifactCount - 1);
+			else this.artifactPreviewIndex = 0;
+			const artifact = this.artifactPreviewOpen ? selected?.artifacts[this.artifactPreviewIndex] : undefined;
 			right = [
 				renderSectionTitle(rightTitleText, rightWidth, theme),
-				...renderArtifacts(selected, rightWidth, theme),
+				...renderArtifacts(selected, rightWidth, theme, this.artifactPreviewIndex),
+				...(artifactCount > 0 ? ["", clampLine("Use [ and ] to choose an artifact. Press O to preview the selected artifact.", rightWidth)] : []),
 				...(artifact ? ["", renderSectionTitle("Preview", rightWidth, theme)] : []),
 				...renderArtifactContent(artifact, rightWidth, 18, theme),
 			];
@@ -260,7 +305,7 @@ export class Dashboard implements Component {
 		while (visibleRight.length < minPaneRows) visibleRight.push("");
 		for (const line of splitColumns(left, visibleRight, innerWidth, theme)) lines.push(renderBoxedLine(line, safeWidth, theme));
 		lines.push(renderDivider(safeWidth, theme));
-		for (const line of renderFooterHints(innerWidth, theme)) lines.push(renderBoxedLine(line, safeWidth, theme));
+		for (const line of renderFooterHints(innerWidth, theme, this.mode)) lines.push(renderBoxedLine(line, safeWidth, theme));
 		lines.push(renderBoxedLine(clampLine(DASHBOARD_HELP_TEXT, innerWidth), safeWidth, theme));
 		lines.push(renderBottomBorder(safeWidth, theme));
 
