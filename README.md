@@ -12,21 +12,14 @@
 
 The `/agents` screen uses a tall bordered, theme-aware dashboard with an agent list pane, agent description pane, mode tabs, and wrapped footer hints. Press `H` for descriptive help that explains what each dashboard mode shows.
 
-- `C` create a new job with empty name/task fields and a selectable worker model; `Esc` or `Ctrl+C` cancels and returns to the dashboard.
+- `G` show AGENTS mode, `T` show TRACKING, `P` show APPROVALS, `F` show ARTIFACTS, and `H` show HELP.
 - `1`-`9` select an agent job in every dashboard mode.
 - `Up` / `Down` scroll the right-hand panel when there is more content than visible space.
-- `S` start the selected job.
-- `X` abort the selected job.
-- `Delete` or `Backspace` delete the selected job and its `.agents/{AGENT_NAME}` workspace after confirmation.
-- `A` approve the first pending approval.
-- `N` deny the first pending approval.
-- `Enter` return to the main `AGENTS` screen.
-- `L` show TRACKING: a readable timeline of user messages, worker responses, status changes, tool activity, and final response output.
-- `M` send a follow-up message to the selected agent from TRACKING, including after it is `FINISHED`.
-- `P` show approvals.
-- `D` show artifacts; in artifact mode, `[` and `]` move between artifacts and `O` previews the selected artifact.
-- `R` refresh artifacts.
-- `H` show help.
+- AGENTS mode: `C` creates a new job, `S` starts it, `X` aborts it, and `Delete` or `Backspace` deletes it after confirmation.
+- TRACKING mode: `M` sends a follow-up message to the selected agent, including after it is `FINISHED`.
+- APPROVALS mode: `A` approves and `N` denies the first pending approval.
+- ARTIFACTS mode: `[` and `]` move between artifacts, `O` or `Enter` opens a large artifact viewer, and `R` refreshes artifact discovery.
+- Artifact viewer: `Up` / `Down` scroll, `D` shows diff for proposal artifacts, `P` shows the proposal/raw artifact, `O` shows the original file for proposal artifacts, `W` toggles wrapping, and `Q` or `Esc` closes the viewer.
 - `Q` or `Esc` close the dashboard.
 
 ## Workspace rule

@@ -22,7 +22,7 @@ export type DashboardAction =
 	| { type: "scrollUp" }
 	| { type: "scrollDown" };
 
-export const DASHBOARD_HELP_TEXT = "H opens full help. ↑/↓ scroll right panel. Enter returns to agents mode.";
+export const DASHBOARD_HELP_TEXT = "Mode keys: G agents, T tracking, P approvals, F artifacts, H help. Q/Esc closes.";
 
 export function parseDashboardAction(input: string): DashboardAction | undefined {
 	if (matchesKey(input, "escape") || input === "q" || input === "Q") return { type: "close" };
@@ -33,14 +33,15 @@ export function parseDashboardAction(input: string): DashboardAction | undefined
 	if (input === "m" || input === "M") return { type: "message" };
 	if (input === "a" || input === "A") return { type: "approve" };
 	if (input === "n" || input === "N") return { type: "deny" };
-	if (input === "l" || input === "L") return { type: "logs" };
+	if (input === "g" || input === "G") return { type: "normal" };
+	if (input === "t" || input === "T") return { type: "logs" };
 	if (input === "p" || input === "P") return { type: "approvals" };
-	if (input === "d" || input === "D") return { type: "artifacts" };
+	if (input === "f" || input === "F") return { type: "artifacts" };
 	if (input === "h" || input === "H" || input === "?") return { type: "help" };
 	if (input === "[") return { type: "artifactPrevious" };
 	if (input === "]") return { type: "artifactNext" };
 	if (input === "o" || input === "O") return { type: "artifactOpen" };
-	if (matchesKey(input, "enter")) return { type: "normal" };
+	if (matchesKey(input, "enter")) return { type: "artifactOpen" };
 	if (matchesKey(input, "delete") || matchesKey(input, "backspace")) return { type: "delete" };
 	if (matchesKey(input, "up")) return { type: "scrollUp" };
 	if (matchesKey(input, "down")) return { type: "scrollDown" };

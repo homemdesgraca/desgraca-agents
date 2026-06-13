@@ -7,6 +7,7 @@ import type { AgentModelSelection } from "./src/agents/agent-job.ts";
 import { AgentStore } from "./src/agents/agent-store.ts";
 import { PiSubprocessAgentRunner } from "./src/agents/agent-runner.ts";
 import { registerAgentProposalTools } from "./src/agents/proposal-tools.ts";
+import { ArtifactViewer } from "./src/dashboard/artifact-viewer.ts";
 import { CreateJobDialog, type CreateJobDialogResult } from "./src/dashboard/create-job-dialog.ts";
 import { Dashboard } from "./src/dashboard/Dashboard.ts";
 import { DeleteAgentDialog } from "./src/dashboard/delete-agent-dialog.ts";
@@ -181,6 +182,28 @@ export default function desgracaAgentsExtension(pi: ExtensionAPI) {
 					{
 						close: () => done(undefined),
 						notify: (message, level = "info") => ctx.ui.notify(message, level),
+						openArtifactViewer: async (job, artifact) => {
+							await ctx.ui.custom<void>(
+								(viewerTui, viewerTheme, _viewerKeybindings, viewerDone) => new ArtifactViewer({
+									job,
+									artifact,
+									theme: viewerTheme,
+									viewportRows: Math.floor((((viewerTui as unknown as { terminal?: { rows?: number } }).terminal?.rows ?? 50) * 0.95)),
+									onClose: viewerDone,
+								}),
+								{
+									overlay: true,
+									overlayOptions: {
+										anchor: "center",
+										width: "95%",
+										minWidth: 70,
+										maxHeight: "95%",
+										margin: 1,
+									},
+								},
+							);
+							_tui.requestRender();
+						},
 						sendMessage: async (job) => {
 							const message = await ctx.ui.custom<string | undefined>(
 								(dialogTui, dialogTheme, _dialogKeybindings, dialogDone) => new TrackingMessageDialog(dialogTui, dialogTheme, dialogDone, job.name),

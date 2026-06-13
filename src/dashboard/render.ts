@@ -334,33 +334,64 @@ function packTokens(tokens: string[], width: number, separator = "  "): string[]
 }
 
 export function renderFooterHints(width: number, theme?: Theme, mode: DashboardMode = "normal"): string[] {
-	const hints = mode === "artifacts"
-		? [
-			`${key(theme, "1-9")} agents`,
-			`${key(theme, "[")} previous artifact`,
-			`${key(theme, "]")} next artifact`,
-			`${key(theme, "O")} preview`,
-			`${key(theme, "R")} refresh`,
-			`${key(theme, "↑/↓")} scroll`,
-			`${key(theme, "Enter")} agents mode`,
-			`${key(theme, "H")} help`,
-			`${key(theme, "Q/Esc")} close`,
-		]
-		: [
+	const commonClose = `${key(theme, "Q/Esc")} close`;
+	const hintsByMode: Record<DashboardMode, string[]> = {
+		normal: [
 			`${key(theme, "C")} create`,
 			`${key(theme, "1-9")} select agent`,
 			`${key(theme, "S")} start`,
 			`${key(theme, "X")} abort`,
-			`${key(theme, "A/N")} approve/deny`,
 			`${key(theme, "Del")} delete`,
-			`${key(theme, "↑/↓")} scroll`,
-			`${key(theme, "M")} message`,
-			`${key(theme, "L/P/D")} modes`,
-			`${key(theme, "R")} refresh`,
+			`${key(theme, "T")} tracking`,
+			`${key(theme, "P")} approvals`,
+			`${key(theme, "F")} artifacts`,
 			`${key(theme, "H")} help`,
-			`${key(theme, "Q/Esc")} close`,
-		];
-	return packTokens(hints, width).map((line) => padLine(line, width));
+			commonClose,
+		],
+		logs: [
+			`${key(theme, "1-9")} select agent`,
+			`${key(theme, "M")} message`,
+			`${key(theme, "↑/↓")} scroll`,
+			`${key(theme, "G")} agents`,
+			`${key(theme, "P")} approvals`,
+			`${key(theme, "F")} artifacts`,
+			`${key(theme, "H")} help`,
+			commonClose,
+		],
+		approvals: [
+			`${key(theme, "1-9")} select agent`,
+			`${key(theme, "A")} approve`,
+			`${key(theme, "N")} deny`,
+			`${key(theme, "↑/↓")} scroll`,
+			`${key(theme, "G")} agents`,
+			`${key(theme, "T")} tracking`,
+			`${key(theme, "F")} artifacts`,
+			`${key(theme, "H")} help`,
+			commonClose,
+		],
+		artifacts: [
+			`${key(theme, "1-9")} select agent`,
+			`${key(theme, "[")} prev`,
+			`${key(theme, "]")} next`,
+			`${key(theme, "O/Enter")} open`,
+			`${key(theme, "R")} refresh`,
+			`${key(theme, "↑/↓")} scroll`,
+			`${key(theme, "G")} agents`,
+			`${key(theme, "T")} tracking`,
+			`${key(theme, "P")} approvals`,
+			`${key(theme, "H")} help`,
+			commonClose,
+		],
+		help: [
+			`${key(theme, "G")} agents`,
+			`${key(theme, "T")} tracking`,
+			`${key(theme, "P")} approvals`,
+			`${key(theme, "F")} artifacts`,
+			`${key(theme, "↑/↓")} scroll`,
+			commonClose,
+		],
+	};
+	return packTokens(hintsByMode[mode], width).map((line) => padLine(line, width));
 }
 
 export function renderHelp(width: number, theme?: Theme): string[] {
@@ -369,20 +400,18 @@ export function renderHelp(width: number, theme?: Theme): string[] {
 		heading("Navigation"),
 		`${key(theme, "1-9")} select an agent job from the left pane. The selected job drives every detail view and action, including ARTIFACTS mode.`,
 		`${key(theme, "↑/↓")} scroll the right-hand panel when its content is longer than the visible dashboard area.`,
-		`${key(theme, "Enter")} returns to agents mode. ${key(theme, "Q/Esc")} closes the dashboard.`,
+		`${key(theme, "G/T/P/F/H")} switch modes: AGENTS, TRACKING, APPROVALS, ARTIFACTS, and HELP. ${key(theme, "Q/Esc")} closes the dashboard.`,
 		"",
 		heading("Job actions"),
-		`${key(theme, "C")} create a task-scoped agent job. Opens an empty overlay for the worker name, model, and task; cancelling returns to this dashboard without creating anything.`,
-		`${key(theme, "S")} start the selected job in its isolated workspace. ${key(theme, "X")} aborts the selected job if it is running. ${key(theme, "M")} sends a follow-up message from TRACKING.`,
-		`${key(theme, "Del/Backspace")} deletes the selected agent job after confirmation and removes its .agents workspace.`,
-		`${key(theme, "A")} approves the first pending approval for the selected agent. ${key(theme, "N")} denies it.`,
-		`${key(theme, "R")} refreshes artifact discovery for the selected agent.`,
+		`${key(theme, "C")} creates a task-scoped agent job in AGENTS mode. Opens an empty overlay for the worker name, model, and task; cancelling returns to this dashboard without creating anything.`,
+		`${key(theme, "S")} starts the selected job in AGENTS mode. ${key(theme, "X")} aborts the selected job if it is running. ${key(theme, "Del/Backspace")} deletes the selected agent job after confirmation and removes its .agents workspace.`,
+		`${key(theme, "M")} sends a follow-up message from TRACKING. ${key(theme, "A")} approves and ${key(theme, "N")} denies pending approvals from APPROVALS. ${key(theme, "R")} refreshes artifact discovery from ARTIFACTS.`,
 		"",
 		heading("Dashboard modes"),
 		`${key(theme, "Agents mode")} shows the selected agent's identity, status, readable root, writable root, allowed tools, model, task, final response preview, process state, and recent logs.`,
 		`${key(theme, "Tracking mode")} auto-scrolls as work arrives and shows a readable timeline of user messages, worker responses, status changes, artifact-writing guidance, and detailed tool activity. Use ${key(theme, "M")} to keep talking to a finished worker.`,
 		`${key(theme, "Approvals mode")} shows pending sensitive tool requests for the selected agent, including tool name, input summary, policy reason, and simple risk warnings.`,
-		`${key(theme, "Artifacts mode")} lists files discovered under the selected agent's .agents workspace. Use ${key(theme, "[")} and ${key(theme, "]")} to move between artifacts and ${key(theme, "O")} to preview the selected artifact without applying it to the project. ${key(theme, "1-9")} still selects agents in this mode.`,
+		`${key(theme, "Artifacts mode")} lists files discovered under the selected agent's .agents workspace. Use ${key(theme, "[")} and ${key(theme, "]")} to move between artifacts and ${key(theme, "O/Enter")} to open a large artifact viewer without applying it to the project. ${key(theme, "1-9")} still selects agents in this mode.`,
 		`${key(theme, "Help mode")} is this reference view with grouped navigation, job actions, and mode descriptions.`,
 	];
 	return lines.flatMap((line) => (line === "" ? [""] : wrapWords(line, width))).map((line) => clampLine(line, width));

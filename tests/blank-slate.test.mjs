@@ -74,6 +74,7 @@ before(async () => {
 			"src/agents/agent-runner.ts",
 			"src/agents/agent-store.ts",
 			"src/agents/proposal-tools.ts",
+			"src/dashboard/artifact-viewer.ts",
 			"src/dashboard/Dashboard.ts",
 			"src/dashboard/keybindings.ts",
 			"src/dashboard/render.ts",
@@ -210,7 +211,7 @@ describe("blank-slate MVP foundations", () => {
 
 	test("dashboard renderers expose jobs, approvals, artifacts, and direct-key help", async () => {
 		const { createAgentJob } = await importCompiled("src/agents/agent-job.js");
-		const { renderJobList, renderApprovals, renderArtifacts, renderArtifactContent, renderHelp } = await importCompiled("src/dashboard/render.js");
+		const { renderJobList, renderApprovals, renderArtifacts, renderArtifactContent, renderFooterHints, renderHelp } = await importCompiled("src/dashboard/render.js");
 		const { parseDashboardAction } = await importCompiled("src/dashboard/keybindings.js");
 		const cwd = await fsp.mkdtemp(path.join(os.tmpdir(), "render-"));
 		try {
@@ -245,11 +246,62 @@ describe("blank-slate MVP foundations", () => {
 			assert.match(renderArtifactContent(job.artifacts[0], 100).join("\n"), /line two/);
 			assert.match(renderHelp(120).join("\n"), /C create/);
 			assert.match(renderHelp(120).join("\n"), /still selects agents/);
-			assert.deepEqual(parseDashboardAction("D"), { type: "artifacts" });
+			assert.deepEqual(parseDashboardAction("F"), { type: "artifacts" });
+			assert.equal(parseDashboardAction("D"), undefined);
+			assert.equal(parseDashboardAction("L"), undefined);
+			assert.deepEqual(parseDashboardAction("T"), { type: "logs" });
+			assert.deepEqual(parseDashboardAction("G"), { type: "normal" });
 			assert.deepEqual(parseDashboardAction("3"), { type: "select", index: 2 });
 			assert.deepEqual(parseDashboardAction("["), { type: "artifactPrevious" });
 			assert.deepEqual(parseDashboardAction("]"), { type: "artifactNext" });
 			assert.deepEqual(parseDashboardAction("O"), { type: "artifactOpen" });
+			assert.deepEqual(parseDashboardAction("\r"), { type: "artifactOpen" });
+			assert.doesNotMatch(renderFooterHints(120, undefined, "artifacts").join("\n"), /approve|deny/);
+			assert.doesNotMatch(renderFooterHints(120, undefined, "normal").join("\n"), /approve|deny/);
+			assert.match(renderFooterHints(120, undefined, "approvals").join("\n"), /approve/);
+		} finally {
+			await fsp.rm(cwd, { recursive: true, force: true });
+		}
+	});
+
+	test("artifact viewer builds colored-review diff lines without truncating content", async () => {
+		const { ArtifactViewer, buildLineDiff } = await importCompiled("src/dashboard/artifact-viewer.js");
+		const { createAgentJob } = await importCompiled("src/agents/agent-job.js");
+		const cwd = await fsp.mkdtemp(path.join(os.tmpdir(), "viewer-"));
+		try {
+			const job = createAgentJob(cwd, "viewer worker", "review artifact");
+			const originalPath = path.join(cwd, "src", "file.txt");
+			const proposalPath = path.join(job.writableRoot, "proposals", "src", "file.txt");
+			await fsp.mkdir(path.dirname(originalPath), { recursive: true });
+			await fsp.mkdir(path.dirname(proposalPath), { recursive: true });
+			await fsp.writeFile(originalPath, "one\ntwo\nthree\n");
+			await fsp.writeFile(proposalPath, "one\nTWO\nthree\nfour\n");
+			const diff = buildLineDiff("one\ntwo\n", "one\nTWO\n").map((line) => line.text).join("\n");
+			assert.match(diff, /- two/);
+			assert.match(diff, /\+ TWO/);
+			let closed = false;
+			const viewer = new ArtifactViewer({
+				job,
+				artifact: {
+					id: "artifact-1",
+					agentId: job.id,
+					path: path.join(".agents", job.name, "proposals", "src", "file.txt"),
+					absolutePath: proposalPath,
+					sizeBytes: 19,
+					updatedAt: Date.now(),
+					kind: "proposal",
+					originalPath: path.join("src", "file.txt"),
+				},
+				viewportRows: 20,
+				onClose: () => { closed = true; },
+			});
+			const rendered = viewer.render(100).join("\n");
+			assert.match(rendered, /Artifact viewer/);
+			assert.match(rendered, /DIFF/);
+			assert.match(rendered, /- two/);
+			assert.match(rendered, /\+ TWO/);
+			viewer.handleInput("q");
+			assert.equal(closed, true);
 		} finally {
 			await fsp.rm(cwd, { recursive: true, force: true });
 		}

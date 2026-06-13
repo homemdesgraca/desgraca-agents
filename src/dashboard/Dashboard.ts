@@ -1,13 +1,12 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { Component } from "@earendil-works/pi-tui";
-import type { AgentJob } from "../agents/agent-job.ts";
+import type { AgentArtifact, AgentJob } from "../agents/agent-job.ts";
 import type { AgentStore } from "../agents/agent-store.ts";
 import { discoverArtifacts, type AgentRunner } from "../agents/agent-runner.ts";
 import { DASHBOARD_HELP_TEXT, parseDashboardAction } from "./keybindings.ts";
 import {
 	clampLine,
 	renderApprovals,
-	renderArtifactContent,
 	renderArtifacts,
 	renderBottomBorder,
 	renderBoxedLine,
@@ -32,12 +31,12 @@ export interface DashboardActions {
 	notify(message: string, level?: "info" | "warning" | "error"): void;
 	deleteJob(job: AgentJob): Promise<boolean>;
 	sendMessage(job: AgentJob): Promise<void>;
+	openArtifactViewer(job: AgentJob, artifact: AgentArtifact): Promise<void>;
 }
 
 export class Dashboard implements Component {
 	private mode: DashboardMode = "normal";
 	private artifactPreviewIndex = 0;
-	private artifactPreviewOpen = false;
 	private rightScrollOffset = 0;
 	private notice: { message: string; level: "info" | "warning" | "error" } | undefined;
 	private noticeTimer: ReturnType<typeof setTimeout> | undefined;
@@ -84,7 +83,6 @@ export class Dashboard implements Component {
 		if (action.type === "select") {
 			this.store.selectByIndex(action.index);
 			this.artifactPreviewIndex = 0;
-			this.artifactPreviewOpen = false;
 			this.rightScrollOffset = 0;
 			this.invalidateAndRender();
 			return;
@@ -103,16 +101,20 @@ export class Dashboard implements Component {
 				this.rightScrollOffset += 1;
 				break;
 			case "create":
+				if (!this.requireMode("normal", "Create is available in AGENTS mode. Press G first.")) break;
 				await this.actions.createJob();
 				break;
 			case "start":
+				if (!this.requireMode("normal", "Start is available in AGENTS mode. Press G first.")) break;
 				if (!job) this.showNotice("Create or select a job first.", "warning");
 				else await this.runner.start(job.id);
 				break;
 			case "abort":
+				if (!this.requireMode("normal", "Abort is available in AGENTS mode. Press G first.")) break;
 				if (job) this.runner.abort(job.id);
 				break;
 			case "delete":
+				if (!this.requireMode("normal", "Delete is available in AGENTS mode. Press G first.")) break;
 				if (!job) this.showNotice("No selected job.", "warning");
 				else if (await this.actions.deleteJob(job)) {
 					if (this.runner.isRunning(job.id)) this.runner.abort(job.id);
@@ -127,21 +129,21 @@ export class Dashboard implements Component {
 				this.moveArtifactSelection(1, job);
 				break;
 			case "artifactOpen":
-				this.openSelectedArtifact(job);
+				await this.openSelectedArtifact(job);
 				break;
 			case "message":
+				if (!this.requireMode("logs", "Messages are available in TRACKING mode. Press T first.")) break;
 				if (!job) this.showNotice("No selected job.", "warning");
 				else {
-					this.mode = "logs";
 					this.rightScrollOffset = Number.MAX_SAFE_INTEGER;
 					await this.actions.sendMessage(job);
 				}
 				break;
 			case "approve":
-				this.resolveFirstApproval(job, "approved");
+				if (this.requireMode("approvals", "Approve is available in APPROVALS mode. Press P first.")) this.resolveFirstApproval(job, "approved");
 				break;
 			case "deny":
-				this.resolveFirstApproval(job, "denied");
+				if (this.requireMode("approvals", "Deny is available in APPROVALS mode. Press P first.")) this.resolveFirstApproval(job, "denied");
 				break;
 			case "logs":
 				this.mode = "logs";
@@ -154,7 +156,6 @@ export class Dashboard implements Component {
 			case "artifacts":
 				this.mode = "artifacts";
 				this.artifactPreviewIndex = 0;
-				this.artifactPreviewOpen = false;
 				this.rightScrollOffset = 0;
 				break;
 			case "help":
@@ -164,11 +165,10 @@ export class Dashboard implements Component {
 			case "normal":
 				this.mode = "normal";
 				this.artifactPreviewIndex = 0;
-				this.artifactPreviewOpen = false;
 				this.rightScrollOffset = 0;
 				break;
 			case "refresh":
-				await this.refreshArtifacts(job);
+				if (this.requireMode("artifacts", "Refresh is available in ARTIFACTS mode. Press F first.")) await this.refreshArtifacts(job);
 				break;
 		}
 		this.invalidateAndRender();
@@ -197,9 +197,9 @@ export class Dashboard implements Component {
 		this.rightScrollOffset = 0;
 	}
 
-	private openSelectedArtifact(job: AgentJob | undefined): void {
+	private async openSelectedArtifact(job: AgentJob | undefined): Promise<void> {
 		if (this.mode !== "artifacts") {
-			this.showNotice("Artifact preview is only active in ARTIFACTS mode.", "warning");
+			this.showNotice("Artifact open is available in ARTIFACTS mode. Press F first.", "warning");
 			return;
 		}
 		if (!job || job.artifacts.length === 0) {
@@ -207,8 +207,16 @@ export class Dashboard implements Component {
 			return;
 		}
 		this.artifactPreviewIndex = Math.min(this.artifactPreviewIndex, job.artifacts.length - 1);
-		this.artifactPreviewOpen = true;
+		const artifact = job.artifacts[this.artifactPreviewIndex];
+		if (!artifact) return;
+		await this.actions.openArtifactViewer(job, artifact);
 		this.rightScrollOffset = 0;
+	}
+
+	private requireMode(mode: DashboardMode, message: string): boolean {
+		if (this.mode === mode) return true;
+		this.showNotice(message, "warning");
+		return false;
 	}
 
 	private async refreshArtifacts(job: AgentJob | undefined): Promise<void> {
@@ -272,13 +280,19 @@ export class Dashboard implements Component {
 			const artifactCount = selected?.artifacts.length ?? 0;
 			if (artifactCount > 0) this.artifactPreviewIndex = Math.min(this.artifactPreviewIndex, artifactCount - 1);
 			else this.artifactPreviewIndex = 0;
-			const artifact = this.artifactPreviewOpen ? selected?.artifacts[this.artifactPreviewIndex] : undefined;
+			const artifact = selected?.artifacts[this.artifactPreviewIndex];
 			right = [
 				renderSectionTitle(rightTitleText, rightWidth, theme),
 				...renderArtifacts(selected, rightWidth, theme, this.artifactPreviewIndex),
-				...(artifactCount > 0 ? ["", clampLine("Use [ and ] to choose an artifact. Press O to preview the selected artifact.", rightWidth)] : []),
-				...(artifact ? ["", renderSectionTitle("Preview", rightWidth, theme)] : []),
-				...renderArtifactContent(artifact, rightWidth, 18, theme),
+				...(artifactCount > 0 ? ["", clampLine("Use [ and ] to choose an artifact. Press O or Enter to open the large viewer.", rightWidth)] : []),
+				...(artifact ? [
+					"",
+					renderSectionTitle("Selected artifact", rightWidth, theme),
+					clampLine(`Path: ${artifact.path}`, rightWidth),
+					clampLine(`Type: ${artifact.kind === "proposal" ? "proposal" : "artifact"}`, rightWidth),
+					...(artifact.originalPath ? [clampLine(`Original: ${artifact.originalPath}`, rightWidth)] : []),
+					clampLine(`Size: ${artifact.sizeBytes} bytes`, rightWidth),
+				] : []),
 			];
 		} else if (this.mode === "help") {
 			rightTitleText = "Help";
