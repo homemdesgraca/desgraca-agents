@@ -30,7 +30,7 @@ Each job may read from the current pi working directory. Job-owned writable outp
 .agents/{AGENT_NAME}
 ```
 
-Each workspace includes `agent-job.json`, which persists the job metadata, logs, approvals, artifacts, selected model, and final response so jobs survive reopening `/agents` or starting a new pi session. Worker agents may read/search the main project and use agent-only tools to create reviewable proposals, inspect artifacts, and manage shared notes. Project-file change proposals are written under `.agents/{AGENT_NAME}/proposals/{ORIGINAL_PATH}`, mirroring the original project structure. Agent notes are stored under `.agents/notes` by the note tools. Generated work is not applied automatically; accepting a proposal from the artifact viewer requires an explicit two-step user action.
+Each workspace includes `agent-job.json`, which persists the job metadata, logs, approvals, artifacts, selected model, and final response so jobs survive reopening `/agents` or starting a new pi session. Worker agents may read/search the main project and use agent-only tools to create reviewable proposals, inspect artifacts, and manage shared notes. Project-file change proposals are written under `.agents/{AGENT_NAME}/proposals/{ORIGINAL_PATH}`, mirroring the original project structure. Agent notes are stored under `.agents/{AGENT_NAME}/notes` by the note tools. Generated work is not applied automatically; accepting a proposal from the artifact viewer requires an explicit two-step user action.
 
 ## Permission defaults
 

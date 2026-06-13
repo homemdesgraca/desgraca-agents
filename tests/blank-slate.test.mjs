@@ -473,13 +473,14 @@ describe("blank-slate MVP foundations", () => {
 			assert.match(diffResult.content[0].text, /\+ const value = 3;/);
 
 			await tools.get("agent_create_note").execute("tool-5", { name: "handoff", content: "Initial findings\nTODO: review api\n" }, undefined, undefined, { cwd });
-			assert.equal(await fsp.readFile(path.join(cwd, ".agents", "notes", "handoff.md"), "utf8"), "Initial findings\nTODO: review api\n");
+			assert.equal(await fsp.readFile(path.join(cwd, ".agents", "proposal-worker", "notes", "handoff.md"), "utf8"), "Initial findings\nTODO: review api\n");
+			assert.equal(fs.existsSync(path.join(cwd, ".agents", "notes", "handoff.md")), false);
 			const notesList = await tools.get("agent_view_notes").execute("tool-6", {}, undefined, undefined, { cwd });
 			assert.match(notesList.content[0].text, /handoff\.md/);
 			const noteRead = await tools.get("agent_view_notes").execute("tool-7", { note: "handoff" }, undefined, undefined, { cwd });
 			assert.match(noteRead.content[0].text, /Initial findings/);
 			await tools.get("agent_edit_note").execute("tool-8", { note: "handoff", edits: [{ oldText: "TODO: review api", newText: "DONE: reviewed api" }] }, undefined, undefined, { cwd });
-			assert.equal(await fsp.readFile(path.join(cwd, ".agents", "notes", "handoff.md"), "utf8"), "Initial findings\nDONE: reviewed api\n");
+			assert.equal(await fsp.readFile(path.join(cwd, ".agents", "proposal-worker", "notes", "handoff.md"), "utf8"), "Initial findings\nDONE: reviewed api\n");
 			await assert.rejects(
 				() => tools.get("agent_create_note").execute("tool-9", { name: "../escape", content: "no" }, undefined, undefined, { cwd }),
 				/plain names/,

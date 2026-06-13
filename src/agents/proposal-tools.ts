@@ -122,8 +122,8 @@ async function resolveArtifactPath(cwd: string, writableRoot: string, inputPath:
 	throw new Error(`Artifact not found in ${root}: ${inputPath}`);
 }
 
-function getNotesRoot(cwd: string): string {
-	return path.resolve(cwd, ".agents", "notes");
+function getNotesRoot(writableRoot: string): string {
+	return path.resolve(writableRoot, "notes");
 }
 
 function normalizeNoteFileName(note: string): string {
@@ -140,16 +140,16 @@ function normalizeNoteFileName(note: string): string {
 	return /\.(md|txt)$/i.test(sanitized) ? sanitized : `${sanitized}.md`;
 }
 
-function resolveNotePath(cwd: string, note: string): { root: string; fileName: string; absolutePath: string } {
-	const root = getNotesRoot(cwd);
+function resolveNotePath(writableRoot: string, note: string): { root: string; fileName: string; absolutePath: string } {
+	const root = getNotesRoot(writableRoot);
 	const fileName = normalizeNoteFileName(note);
 	const absolutePath = path.resolve(root, fileName);
 	if (!isPathInside(root, absolutePath)) throw new Error("Note path resolved outside the notes area.");
 	return { root, fileName, absolutePath };
 }
 
-async function listNotes(cwd: string): Promise<Array<{ fileName: string; sizeBytes: number; updatedAt: number }>> {
-	const root = getNotesRoot(cwd);
+async function listNotes(writableRoot: string): Promise<Array<{ fileName: string; sizeBytes: number; updatedAt: number }>> {
+	const root = getNotesRoot(writableRoot);
 	let entries: any[];
 	try {
 		entries = await fs.readdir(root, { withFileTypes: true });
@@ -183,10 +183,10 @@ export function registerAgentProposalTools(pi: ExtensionAPI): void {
 			content: Type.String({ description: "Full note content." }),
 			description: Type.Optional(Type.String({ description: "Short reason or summary for this note." })),
 		}),
-		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
 			const agent = getAgentProcessEnvContext();
 			if (!agent?.writableRoot) throw new Error("agent_create_note is only available inside a marked desgraca-agents worker process.");
-			const note = resolveNotePath(ctx.cwd, params.name);
+			const note = resolveNotePath(agent.writableRoot, params.name);
 			await withFileMutationQueue(note.absolutePath, async () => {
 				await fs.mkdir(note.root, { recursive: true });
 				await fs.writeFile(note.absolutePath, params.content, "utf8");
@@ -210,17 +210,17 @@ export function registerAgentProposalTools(pi: ExtensionAPI): void {
 		parameters: Type.Object({
 			note: Type.Optional(Type.String({ description: "Optional plain note name to read." })),
 		}),
-		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
 			const agent = getAgentProcessEnvContext();
 			if (!agent?.writableRoot) throw new Error("agent_view_notes is only available inside a marked desgraca-agents worker process.");
 			if (!params.note?.trim()) {
-				const notes = await listNotes(ctx.cwd);
+				const notes = await listNotes(agent.writableRoot);
 				const text = notes.length === 0
 					? "No notes found."
 					: notes.map((note, index) => `${index + 1}. ${note.fileName} (${note.sizeBytes} bytes)`).join("\n");
 				return { content: [{ type: "text" as const, text }], details: { count: notes.length } };
 			}
-			const note = resolveNotePath(ctx.cwd, params.note);
+			const note = resolveNotePath(agent.writableRoot, params.note);
 			let content: string;
 			try {
 				content = await fs.readFile(note.absolutePath, "utf8");
@@ -251,10 +251,10 @@ export function registerAgentProposalTools(pi: ExtensionAPI): void {
 			),
 			description: Type.Optional(Type.String({ description: "Short reason or summary for this note edit." })),
 		}),
-		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
 			const agent = getAgentProcessEnvContext();
 			if (!agent?.writableRoot) throw new Error("agent_edit_note is only available inside a marked desgraca-agents worker process.");
-			const note = resolveNotePath(ctx.cwd, params.note);
+			const note = resolveNotePath(agent.writableRoot, params.note);
 			let content = await fs.readFile(note.absolutePath, "utf8");
 			for (const [index, edit] of params.edits.entries()) {
 				const matches = countOccurrences(content, edit.oldText);
