@@ -52,6 +52,7 @@ export class Dashboard implements Component {
 		private readonly theme?: Theme,
 	) {
 		this.unsubscribe = this.store.subscribe(() => {
+			if (this.mode === "logs") this.rightScrollOffset = Number.MAX_SAFE_INTEGER;
 			this.invalidate();
 			this.tui.requestRender();
 		});
@@ -121,6 +122,7 @@ export class Dashboard implements Component {
 				if (!job) this.showNotice("No selected job.", "warning");
 				else {
 					this.mode = "logs";
+					this.rightScrollOffset = Number.MAX_SAFE_INTEGER;
 					await this.actions.sendMessage(job);
 				}
 				break;
@@ -132,7 +134,7 @@ export class Dashboard implements Component {
 				break;
 			case "logs":
 				this.mode = "logs";
-				this.rightScrollOffset = 0;
+				this.rightScrollOffset = Number.MAX_SAFE_INTEGER;
 				break;
 			case "approvals":
 				this.mode = "approvals";

@@ -94,7 +94,7 @@ describe("blank-slate MVP foundations", () => {
 		assert.equal(settings.toolPolicies.bash, "ask");
 		assert.equal(settings.toolPolicies.write, "ask");
 		assert.equal(settings.toolPolicies.edit, "ask");
-		assert.deepEqual(settings.childRunnerTools, ["read", "grep", "find", "ls"]);
+		assert.deepEqual(settings.childRunnerTools, ["read", "grep", "find", "ls", "write"]);
 	});
 
 	test("agent jobs are sanitized and isolated under .agents", async () => {
@@ -107,7 +107,7 @@ describe("blank-slate MVP foundations", () => {
 			assert.equal(job.readableRoot, path.resolve(cwd));
 			assert.equal(job.writableRoot, path.join(cwd, ".agents", "module-x-worker"));
 			assert.equal(job.status, "draft");
-			assert.deepEqual(job.allowedTools, ["read", "grep", "find", "ls"]);
+			assert.deepEqual(job.allowedTools, ["read", "grep", "find", "ls", "write"]);
 		} finally {
 			await fsp.rm(cwd, { recursive: true, force: true });
 		}
@@ -249,6 +249,31 @@ describe("blank-slate MVP foundations", () => {
 		delete process.env.DESGRACA_AGENT_WRITABLE_ROOT;
 		const result = await handlers.get("tool_call")({ toolName: "write", input: { path: "main.txt" } }, { cwd: projectRoot });
 		assert.equal(result, undefined);
+	});
+
+	test("agent-scoped writes inside the writable root are allowed without child UI", async () => {
+		const extension = (await importCompiled("index.js")).default;
+		const handlers = new Map();
+		extension({
+			on: (name, handler) => handlers.set(name, handler),
+			registerCommand: () => {},
+			appendEntry: () => {},
+		});
+		const cwd = await fsp.mkdtemp(path.join(os.tmpdir(), "extension-scope-allowed-"));
+		try {
+			process.env.DESGRACA_AGENT_JOB_ID = "agent-1";
+			process.env.DESGRACA_AGENT_NAME = "scope-worker";
+			process.env.DESGRACA_AGENT_WRITABLE_ROOT = path.join(cwd, ".agents", "scope-worker");
+			const input = { path: path.join(cwd, ".agents", "scope-worker", "notes.md") };
+			const result = await handlers.get("tool_call")({ toolName: "write", input }, { cwd, hasUI: false });
+			assert.equal(result, undefined);
+			assert.equal(input.path, path.join(cwd, ".agents", "scope-worker", "notes.md"));
+		} finally {
+			delete process.env.DESGRACA_AGENT_JOB_ID;
+			delete process.env.DESGRACA_AGENT_NAME;
+			delete process.env.DESGRACA_AGENT_WRITABLE_ROOT;
+			await fsp.rm(cwd, { recursive: true, force: true });
+		}
 	});
 
 	test("agent-scoped write attempts outside the writable root are blocked before approval", async () => {

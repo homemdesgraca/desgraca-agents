@@ -37,10 +37,10 @@ Each job may read from the current pi working directory. Job-owned writable outp
 .agents/{AGENT_NAME}
 ```
 
-Each workspace includes `agent-job.json`, which persists the job metadata, logs, approvals, artifacts, selected model, and final response so jobs survive reopening `/agents` or starting a new pi session. The MVP runner starts child pi processes in read-only mode (`read`, `grep`, `find`, and `ls`) until full child tool-call approval is implemented. Generated work is not applied automatically to the main project.
+Each workspace includes `agent-job.json`, which persists the job metadata, logs, approvals, artifacts, selected model, and final response so jobs survive reopening `/agents` or starting a new pi session. Worker agents may read/search the main project and may write reviewable artifacts under their own `.agents/{AGENT_NAME}` workspace only. Generated work is not applied automatically to the main project.
 
 ## Permission defaults
 
 These permission policies are agent-scoped only. `desgraca-agents` does not intercept or approve normal plain-LLM tool calls in the parent pi session; those should remain owned by your regular approval extensions or pi configuration.
 
-For marked agent subprocesses, read/search tools are allowed by default. `bash`, `write`, and `edit` ask for approval by default if they are ever enabled for an agent. Simple bash warnings are surfaced for patterns such as `rm`, `curl`, `wget`, `sudo`, `chmod`, `chown`, `kill`, and shell redirection.
+For marked agent subprocesses, read/search tools are allowed by default. `write` is available for isolated workspace artifacts and asks for approval by default. `bash` and `edit` also ask for approval by default if they are enabled for an agent. Simple bash warnings are surfaced for patterns such as `rm`, `curl`, `wget`, `sudo`, `chmod`, `chown`, `kill`, and shell redirection.

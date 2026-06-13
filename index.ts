@@ -117,6 +117,11 @@ export default function desgracaAgentsExtension(pi: ExtensionAPI) {
 			return scopeViolation;
 		}
 
+		if (event.toolName === "write") {
+			if (selected) store.appendLog(selected.id, "Workspace-scoped write allowed for isolated artifact output.", "debug");
+			return;
+		}
+
 		const decision = decideToolPolicy(settings, event.toolName, event.input, scopedAgent);
 		if (decision.action === "allow") return;
 		if (decision.action === "deny") return { block: true, reason: decision.reason };

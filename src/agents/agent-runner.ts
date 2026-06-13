@@ -120,14 +120,14 @@ export class PiSubprocessAgentRunner implements AgentRunner {
 		const invocation = getPiInvocation(args);
 		const loggedArgs = invocation.args.map((arg) => (arg === prompt ? "<task prompt>" : arg));
 		this.store.setStatus(jobId, "running");
-		this.store.appendLog(jobId, `Starting read-only subprocess: ${invocation.command} ${loggedArgs.join(" ")}`);
-		this.store.appendTracking(jobId, { kind: "status", title: followUp ? "Sending message" : "Worker started", message: `${invocation.command} ${loggedArgs.join(" ")}` });
+		this.store.appendLog(jobId, `Starting isolated subprocess: ${invocation.command} ${loggedArgs.join(" ")}`);
+		this.store.appendTracking(jobId, { kind: "status", title: followUp ? "Sending message" : "Worker started", message: `Isolated worker process started. It may write reviewable artifacts only under ${job.writableRoot}.\n${invocation.command} ${loggedArgs.join(" ")}` });
 		this.store.update(jobId, {
 			process: {
 				command: invocation.command,
 				args: invocation.args,
 				startedAt: Date.now(),
-				readOnly: true,
+				readOnly: false,
 			},
 		});
 
@@ -203,8 +203,10 @@ export class PiSubprocessAgentRunner implements AgentRunner {
 			`You are an isolated task-scoped worker named ${job.name}.`,
 			`Main project root: ${job.readableRoot}`,
 			`Writable artifact workspace: ${job.writableRoot}`,
-			"For this MVP runner you are limited to safe read/search tools only. Do not attempt direct project mutations.",
-			"Produce implementation notes, patch proposals, or artifact instructions in your final response.",
+			"You may read/search the main project, but you must not directly modify files in the main project tree.",
+			`You CAN and SHOULD write reviewable artifacts, notes, plans, patch proposals, or generated files inside your isolated writable workspace: ${job.writableRoot}`,
+			"Use the write tool for files in that workspace when a concrete artifact would help the user review your work later. The user will inspect these artifacts before applying anything to the real project.",
+			"If you need to change project code, write a patch/proposal or full replacement file under the isolated workspace instead of editing the main project directly.",
 			"Task:",
 			job.task,
 		];

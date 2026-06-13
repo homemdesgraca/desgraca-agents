@@ -216,7 +216,7 @@ export function renderJobDetails(job: AgentJob | undefined, width: number, theme
 		...renderField("Model", job.model ? `${job.model.provider}/${job.model.id}` : "current pi default", width, theme),
 		...renderField("Task", job.task || "(empty)", width, theme),
 		...renderFinalResponse(job, width, theme),
-		clampLine(`${fg(theme, "dim", "Process:")} ${fg(theme, "text", job.process?.pid ? `pid ${job.process.pid}` : "not running")}${job.process?.readOnly ? fg(theme, "warning", " | read-only runner") : ""}`, width),
+		clampLine(`${fg(theme, "dim", "Process:")} ${fg(theme, "text", job.process?.pid ? `pid ${job.process.pid}` : "not running")}${job.process ? fg(theme, "muted", " | isolated workspace") : ""}`, width),
 	];
 }
 
@@ -364,7 +364,7 @@ export function renderHelp(width: number, theme?: Theme): string[] {
 		"",
 		heading("Dashboard modes"),
 		`${key(theme, "Agents mode")} shows the selected agent's identity, status, readable root, writable root, allowed tools, model, task, final response preview, process state, and recent logs.`,
-		`${key(theme, "Tracking mode")} shows a readable timeline of user messages, worker responses, status changes, and detailed tool activity. Use ${key(theme, "M")} to keep talking to a finished worker.`,
+		`${key(theme, "Tracking mode")} auto-scrolls as work arrives and shows a readable timeline of user messages, worker responses, status changes, artifact-writing guidance, and detailed tool activity. Use ${key(theme, "M")} to keep talking to a finished worker.`,
 		`${key(theme, "Approvals mode")} shows pending sensitive tool requests for the selected agent, including tool name, input summary, policy reason, and simple risk warnings.`,
 		`${key(theme, "Artifacts mode")} lists files discovered under the selected agent's .agents workspace. Press ${key(theme, "1-9")} in this mode to preview an artifact without applying it to the project.`,
 		`${key(theme, "Help mode")} is this reference view with grouped navigation, job actions, and mode descriptions.`,

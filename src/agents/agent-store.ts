@@ -192,7 +192,7 @@ export class AgentStore {
 			status,
 			readableRoot: path.resolve(cwd),
 			writableRoot,
-			allowedTools: Array.isArray(job.allowedTools) ? job.allowedTools : ["read", "grep", "find", "ls"],
+			allowedTools: Array.isArray(job.allowedTools) && job.allowedTools.length > 0 ? Array.from(new Set([...job.allowedTools, "write"])) : ["read", "grep", "find", "ls", "write"],
 			logs: [...logs, ...restoredLog],
 			tracking: [...tracking, ...restoredLog.map((log) => ({ id: createId(), timestamp: log.timestamp, kind: "status" as const, title: "Restored", message: log.message }))],
 			pendingApprovals: Array.isArray(job.pendingApprovals) ? job.pendingApprovals : [],

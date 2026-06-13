@@ -114,7 +114,7 @@ export function createAgentJob(cwd: string, name: string, task: string, model?: 
 		task: task.trim(),
 		model,
 		status: "draft",
-		allowedTools: ["read", "grep", "find", "ls"],
+		allowedTools: ["read", "grep", "find", "ls", "write"],
 		readableRoot: path.resolve(cwd),
 		writableRoot: getAgentWritableRoot(cwd, safeName),
 		logs: [

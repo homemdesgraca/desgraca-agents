@@ -19,7 +19,7 @@ export const DEFAULT_TOOL_POLICIES: Record<string, ToolPolicy> = {
 export function createDefaultSettings(): AgentExtensionSettings {
 	return {
 		toolPolicies: { ...DEFAULT_TOOL_POLICIES },
-		childRunnerTools: ["read", "grep", "find", "ls"],
+		childRunnerTools: ["read", "grep", "find", "ls", "write"],
 		taskWorkspaceDir: ".agents",
 	};
 }
