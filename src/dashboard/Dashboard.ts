@@ -1,3 +1,4 @@
+import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { Component } from "@earendil-works/pi-tui";
 import type { AgentJob } from "../agents/agent-job.ts";
 import type { AgentStore } from "../agents/agent-store.ts";
@@ -8,11 +9,18 @@ import {
 	renderApprovals,
 	renderArtifactContent,
 	renderArtifacts,
+	renderBottomBorder,
+	renderBoxedLine,
+	renderDivider,
+	renderFooterHints,
 	renderHeader,
 	renderHelp,
 	renderJobDetails,
 	renderJobList,
 	renderLogs,
+	renderModeTabs,
+	renderSectionTitle,
+	renderTopBorder,
 	splitColumns,
 	type DashboardMode,
 } from "./render.ts";
@@ -35,6 +43,7 @@ export class Dashboard implements Component {
 		private readonly runner: AgentRunner,
 		private readonly actions: DashboardActions,
 		private readonly tui: { requestRender: () => void },
+		private readonly theme?: Theme,
 	) {
 		this.unsubscribe = this.store.subscribe(() => {
 			this.invalidate();
@@ -144,23 +153,44 @@ export class Dashboard implements Component {
 		const jobs = this.store.list();
 		const selected = this.store.getSelected();
 		const selectedId = selected?.id;
+		const theme = this.theme;
 		const lines: string[] = [];
+		const innerWidth = Math.max(1, safeWidth - 2);
+		const leftWidth = Math.max(24, Math.floor(innerWidth * 0.38));
+		const rightWidth = Math.max(10, innerWidth - leftWidth - 3);
 
-		lines.push(...renderHeader(safeWidth, this.mode));
-		lines.push(clampLine("".padEnd(Math.min(safeWidth, 120), "─"), safeWidth));
+		lines.push(renderTopBorder(safeWidth, " Agent control dashboard ", theme));
+		for (const line of renderHeader(innerWidth, this.mode, theme, selected)) lines.push(renderBoxedLine(line, safeWidth, theme));
+		for (const line of renderModeTabs(this.mode, innerWidth, theme)) lines.push(renderBoxedLine(line, safeWidth, theme));
+		lines.push(renderDivider(safeWidth, theme));
 
-		const left = ["Agents", ...renderJobList(jobs, selectedId, Math.floor(safeWidth * 0.38))];
+		const left = [renderSectionTitle("Agents", leftWidth, theme), ...renderJobList(jobs, selectedId, leftWidth, theme)];
 		let right: string[];
-		if (this.mode === "logs") right = ["Logs", ...renderLogs(selected, Math.floor(safeWidth * 0.58), 18)];
-		else if (this.mode === "approvals") right = ["Approvals", ...renderApprovals(selected, Math.floor(safeWidth * 0.58))];
+		if (this.mode === "logs") right = [renderSectionTitle("Logs", rightWidth, theme), ...renderLogs(selected, rightWidth, 18, theme)];
+		else if (this.mode === "approvals") right = [renderSectionTitle("Approvals", rightWidth, theme), ...renderApprovals(selected, rightWidth, theme)];
 		else if (this.mode === "artifacts") {
 			const artifact = selected?.artifacts[this.artifactPreviewIndex ?? -1];
-			right = ["Artifacts", ...renderArtifacts(selected, Math.floor(safeWidth * 0.58)), ...renderArtifactContent(artifact, Math.floor(safeWidth * 0.58))];
-		} else if (this.mode === "help") right = ["Help", ...renderHelp(Math.floor(safeWidth * 0.58))];
-		else right = ["Selected agent", ...renderJobDetails(selected, Math.floor(safeWidth * 0.58)), "", "Recent logs", ...renderLogs(selected, Math.floor(safeWidth * 0.58), 6)];
-		lines.push(...splitColumns(left, right, safeWidth));
-		lines.push(clampLine("".padEnd(Math.min(safeWidth, 120), "─"), safeWidth));
-		lines.push(clampLine(DASHBOARD_HELP_TEXT, safeWidth));
+			right = [
+				renderSectionTitle("Artifacts", rightWidth, theme),
+				...renderArtifacts(selected, rightWidth, theme),
+				...(artifact ? ["", renderSectionTitle("Preview", rightWidth, theme)] : []),
+				...renderArtifactContent(artifact, rightWidth, 18, theme),
+			];
+		} else if (this.mode === "help") right = [renderSectionTitle("Help", rightWidth, theme), ...renderHelp(rightWidth, theme)];
+		else {
+			right = [
+				renderSectionTitle("Selected agent", rightWidth, theme),
+				...renderJobDetails(selected, rightWidth, theme),
+				"",
+				renderSectionTitle("Recent logs", rightWidth, theme),
+				...renderLogs(selected, rightWidth, 6, theme),
+			];
+		}
+		for (const line of splitColumns(left, right, innerWidth, theme)) lines.push(renderBoxedLine(line, safeWidth, theme));
+		lines.push(renderDivider(safeWidth, theme));
+		for (const line of renderFooterHints(innerWidth, theme)) lines.push(renderBoxedLine(line, safeWidth, theme));
+		lines.push(renderBoxedLine(clampLine(DASHBOARD_HELP_TEXT, innerWidth), safeWidth, theme));
+		lines.push(renderBottomBorder(safeWidth, theme));
 
 		this.cachedLines = lines.map((line) => clampLine(line, safeWidth));
 		this.cachedWidth = width;

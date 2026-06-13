@@ -1,16 +1,144 @@
 import * as fs from "node:fs";
+import type { Theme } from "@earendil-works/pi-coding-agent";
+import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { AgentApproval, AgentArtifact, AgentJob } from "../agents/agent-job.ts";
 
 export type DashboardMode = "normal" | "logs" | "approvals" | "artifacts" | "help";
 
+type FgColor = Parameters<Theme["fg"]>[0];
+type BgColor = Parameters<Theme["bg"]>[0];
+
+const MODE_LABELS: Record<DashboardMode, string> = {
+	normal: "NORMAL",
+	logs: "LOGS",
+	approvals: "APPROVALS",
+	artifacts: "ARTIFACTS",
+	help: "HELP",
+};
+
+function fg(theme: Theme | undefined, color: FgColor, text: string): string {
+	return theme ? theme.fg(color, text) : text;
+}
+
+function bg(theme: Theme | undefined, color: BgColor, text: string): string {
+	return theme ? theme.bg(color, text) : text;
+}
+
+function bold(theme: Theme | undefined, text: string): string {
+	return theme ? theme.bold(text) : text;
+}
+
+function normalizeLine(line: string): string {
+	return line.replace(/[\r\n]+/g, " ");
+}
+
 export function clampLine(line: string, width: number): string {
 	if (width <= 0) return "";
-	const clean = line.replace(/[\r\n]+/g, " ");
-	return clean.length > width ? clean.slice(0, Math.max(0, width - 1)) + "…" : clean.padEnd(Math.min(width, clean.length));
+	return truncateToWidth(normalizeLine(line), width, "…", true);
+}
+
+export function padLine(line: string, width: number): string {
+	const truncated = clampLine(line, width);
+	return truncated + " ".repeat(Math.max(0, width - visibleWidth(truncated)));
+}
+
+export function wrapPlainLine(line: string, width: number): string[] {
+	if (width <= 0) return [""];
+	if (line.length === 0) return [""];
+
+	const chunks: string[] = [];
+	let current = "";
+	for (const char of Array.from(line.replace(/\t/g, "    "))) {
+		if (visibleWidth(current + char) > width && current.length > 0) {
+			chunks.push(current);
+			current = char;
+		} else {
+			current += char;
+		}
+	}
+	if (current.length > 0) chunks.push(current);
+	return chunks.length > 0 ? chunks : [""];
+}
+
+function wrapWords(text: string, width: number): string[] {
+	if (width <= 0) return [""];
+	const words = text.split(/(\s+)/).filter((part) => part.length > 0);
+	const lines: string[] = [];
+	let current = "";
+	for (const word of words) {
+		if (/^\s+$/.test(word)) {
+			if (current && !current.endsWith(" ")) current += " ";
+			continue;
+		}
+		const candidate = current ? `${current}${word}` : word;
+		if (visibleWidth(candidate) <= width) {
+			current = candidate;
+			continue;
+		}
+		if (current) lines.push(current.trimEnd());
+		if (visibleWidth(word) > width) {
+			const hardWrapped = wrapPlainLine(word, width);
+			lines.push(...hardWrapped.slice(0, -1));
+			current = hardWrapped.at(-1) ?? "";
+		} else {
+			current = word;
+		}
+	}
+	if (current) lines.push(current.trimEnd());
+	return lines.length > 0 ? lines : [""];
+}
+
+function border(theme: Theme | undefined, text: string, accent = false): string {
+	return fg(theme, accent ? "borderAccent" : "borderMuted", text);
+}
+
+export function renderDivider(width: number, theme?: Theme, left = "├", right = "┤"): string {
+	if (width <= 1) return border(theme, "─".repeat(Math.max(0, width)));
+	return border(theme, left + "─".repeat(Math.max(0, width - 2)) + right);
+}
+
+export function renderTopBorder(width: number, title: string, theme?: Theme): string {
+	if (width <= 1) return border(theme, "─".repeat(Math.max(0, width)), true);
+	const innerWidth = Math.max(0, width - 2);
+	const renderedTitle = ` ${fg(theme, "warning", bold(theme, title))} `;
+	const fill = Math.max(0, innerWidth - visibleWidth(renderedTitle));
+	return border(theme, "╭", true) + renderedTitle + border(theme, "─".repeat(fill) + "╮", true);
+}
+
+export function renderBottomBorder(width: number, theme?: Theme): string {
+	if (width <= 1) return border(theme, "─".repeat(Math.max(0, width)), true);
+	return border(theme, "╰" + "─".repeat(Math.max(0, width - 2)) + "╯", true);
+}
+
+export function renderBoxedLine(line: string, width: number, theme?: Theme): string {
+	if (width <= 1) return clampLine(line, width);
+	const innerWidth = Math.max(0, width - 2);
+	return border(theme, "│", true) + padLine(line, innerWidth) + border(theme, "│", true);
 }
 
 export function formatStatus(status: AgentJob["status"]): string {
 	return status.toUpperCase();
+}
+
+export function formatStatusLabel(status: AgentJob["status"], theme?: Theme): string {
+	const label = formatStatus(status);
+	switch (status) {
+		case "running":
+			return fg(theme, "success", label);
+		case "blocked":
+			return fg(theme, "warning", label);
+		case "failed":
+			return fg(theme, "error", label);
+		case "done":
+			return fg(theme, "success", label);
+		case "aborted":
+			return fg(theme, "muted", label);
+		case "waiting":
+			return fg(theme, "accent", label);
+		case "draft":
+		default:
+			return fg(theme, "dim", label);
+	}
 }
 
 export function formatTime(timestamp: number | undefined): string {
@@ -18,102 +146,179 @@ export function formatTime(timestamp: number | undefined): string {
 	return new Date(timestamp).toLocaleTimeString();
 }
 
-export function renderHeader(width: number, mode: DashboardMode): string[] {
-	return [
-		clampLine(`desgraca-agents dashboard | mode: ${mode}`, width),
-		clampLine("Agents are isolated under .agents/{AGENT_NAME}; generated work is never applied automatically.", width),
-	];
+export function renderHeader(width: number, mode: DashboardMode, theme?: Theme, selected?: AgentJob): string[] {
+	const modeText = fg(theme, "accent", bold(theme, MODE_LABELS[mode]));
+	const title = `${fg(theme, "toolTitle", bold(theme, "desgraca-agents"))} ${fg(theme, "dim", "dashboard")}  ${fg(theme, "dim", "mode:")} ${modeText}`;
+	const safety = fg(theme, "muted", "Isolated workspaces: .agents/{AGENT_NAME}. Generated work is never applied automatically.");
+	const summary = selected
+		? `${fg(theme, "dim", "selected:")} ${fg(theme, "text", selected.name)} ${fg(theme, "dim", "status:")} ${formatStatusLabel(selected.status, theme)} ${fg(theme, "dim", "artifacts:")} ${fg(theme, "accent", String(selected.artifacts.length))}`
+		: fg(theme, "dim", "No selected agent. Press C to create a task-scoped worker.");
+	return [padLine(title, width), padLine(safety, width), padLine(summary, width)];
 }
 
-export function renderJobList(jobs: AgentJob[], selectedId: string | undefined, width: number): string[] {
-	if (jobs.length === 0) return [clampLine("No agent jobs yet. Press C to create one.", width)];
+export function renderModeTabs(active: DashboardMode, width: number, theme?: Theme): string[] {
+	const tabs = (Object.keys(MODE_LABELS) as DashboardMode[]).map((mode) => {
+		const label = ` ${MODE_LABELS[mode]} `;
+		return mode === active ? bg(theme, "selectedBg", fg(theme, "text", label)) : fg(theme, "dim", label);
+	});
+	return packTokens(tabs, width, " ").map((line) => padLine(line, width));
+}
+
+export function renderJobList(jobs: AgentJob[], selectedId: string | undefined, width: number, theme?: Theme): string[] {
+	if (jobs.length === 0) return [clampLine(fg(theme, "dim", "No agent jobs yet. Press C to create one."), width)];
 	return jobs.map((job, index) => {
-		const prefix = job.id === selectedId ? ">" : " ";
+		const selected = job.id === selectedId;
+		const pointer = selected ? fg(theme, "accent", ">") : fg(theme, "dim", " ");
+		const number = fg(theme, selected ? "accent" : "dim", `${index + 1}.`);
 		const approvalCount = job.pendingApprovals.filter((approval) => approval.status === "pending").length;
-		const approvals = approvalCount > 0 ? ` approvals:${approvalCount}` : "";
-		return clampLine(`${prefix} ${index + 1}. ${job.name} [${formatStatus(job.status)}] artifacts:${job.artifacts.length}${approvals}`, width);
+		const approvals = approvalCount > 0 ? ` ${fg(theme, "warning", `approvals:${approvalCount}`)}` : "";
+		const artifacts = fg(theme, "dim", `artifacts:${job.artifacts.length}`);
+		const row = `${pointer} ${number} ${fg(theme, selected ? "text" : "muted", job.name)} ${fg(theme, "dim", "[")}${formatStatusLabel(job.status, theme)}${fg(theme, "dim", "]")} ${artifacts}${approvals}`;
+		return selected ? bg(theme, "selectedBg", padLine(row, width)) : clampLine(row, width);
 	});
 }
 
-export function renderJobDetails(job: AgentJob | undefined, width: number): string[] {
-	if (!job) return [clampLine("Select or create an agent job.", width)];
+function renderField(label: string, value: string, width: number, theme?: Theme): string[] {
+	const labelText = `${fg(theme, "dim", `${label}:`)} `;
+	const labelWidth = visibleWidth(`${label}: `);
+	const valueWidth = Math.max(8, width - labelWidth);
+	const wrapped = value.split("\n").flatMap((line) => wrapWords(line || " ", valueWidth));
+	return wrapped.map((line, index) => {
+		const prefix = index === 0 ? labelText : " ".repeat(labelWidth);
+		return clampLine(prefix + fg(theme, "text", line), width);
+	});
+}
+
+export function renderJobDetails(job: AgentJob | undefined, width: number, theme?: Theme): string[] {
+	if (!job) return [clampLine(fg(theme, "dim", "Select or create an agent job."), width)];
 	return [
-		clampLine(`Name: ${job.name}`, width),
-		clampLine(`Status: ${formatStatus(job.status)} | created ${formatTime(job.createdAt)} | updated ${formatTime(job.updatedAt)}`, width),
-		clampLine(`Readable root: ${job.readableRoot}`, width),
-		clampLine(`Writable root: ${job.writableRoot}`, width),
-		clampLine(`Allowed tools: ${job.allowedTools.join(", ") || "(none)"}`, width),
-		clampLine(`Task: ${job.task || "(empty)"}`, width),
-		clampLine(`Process: ${job.process?.pid ? `pid ${job.process.pid}` : "not running"}${job.process?.readOnly ? " | read-only runner" : ""}`, width),
+		...renderField("Name", job.name, width, theme),
+		clampLine(`${fg(theme, "dim", "Status:")} ${formatStatusLabel(job.status, theme)} ${fg(theme, "dim", "created")} ${fg(theme, "muted", formatTime(job.createdAt))} ${fg(theme, "dim", "updated")} ${fg(theme, "muted", formatTime(job.updatedAt))}`, width),
+		...renderField("Readable root", job.readableRoot, width, theme),
+		...renderField("Writable root", job.writableRoot, width, theme),
+		...renderField("Allowed tools", job.allowedTools.join(", ") || "(none)", width, theme),
+		...renderField("Task", job.task || "(empty)", width, theme),
+		clampLine(`${fg(theme, "dim", "Process:")} ${fg(theme, "text", job.process?.pid ? `pid ${job.process.pid}` : "not running")}${job.process?.readOnly ? fg(theme, "warning", " | read-only runner") : ""}`, width),
 	];
 }
 
-export function renderLogs(job: AgentJob | undefined, width: number, count = 12): string[] {
-	if (!job) return [clampLine("No selected job.", width)];
+export function renderLogs(job: AgentJob | undefined, width: number, count = 12, theme?: Theme): string[] {
+	if (!job) return [clampLine(fg(theme, "dim", "No selected job."), width)];
 	const logs = job.logs.slice(-count);
-	if (logs.length === 0) return [clampLine("No logs.", width)];
+	if (logs.length === 0) return [clampLine(fg(theme, "dim", "No logs."), width)];
 	return logs.flatMap((log) =>
-		log.message.split("\n").slice(0, 4).map((line, index) => clampLine(`${index === 0 ? formatTime(log.timestamp) : "        "} ${log.level}: ${line}`, width)),
+		log.message.split("\n").slice(0, 4).map((line, index) => {
+			const levelColor: FgColor = log.level === "error" ? "error" : log.level === "warning" ? "warning" : "muted";
+			const stamp = index === 0 ? fg(theme, "dim", formatTime(log.timestamp)) : fg(theme, "dim", "        ");
+			return clampLine(`${stamp} ${fg(theme, levelColor, log.level)} ${fg(theme, "toolOutput", line)}`, width);
+		}),
 	);
 }
 
-export function renderApprovals(job: AgentJob | undefined, width: number): string[] {
-	if (!job) return [clampLine("No selected job.", width)];
+export function renderApprovals(job: AgentJob | undefined, width: number, theme?: Theme): string[] {
+	if (!job) return [clampLine(fg(theme, "dim", "No selected job."), width)];
 	const approvals = job.pendingApprovals.filter((approval) => approval.status === "pending");
-	if (approvals.length === 0) return [clampLine("No pending approvals.", width)];
-	return approvals.flatMap((approval, index) => renderApproval(approval, index, width));
+	if (approvals.length === 0) return [clampLine(fg(theme, "dim", "No pending approvals."), width)];
+	return approvals.flatMap((approval, index) => renderApproval(approval, index, width, theme));
 }
 
-function renderApproval(approval: AgentApproval, index: number, width: number): string[] {
-	const warnings = approval.warnings.length > 0 ? ` | ${approval.warnings.join(" | ")}` : "";
+function renderApproval(approval: AgentApproval, index: number, width: number, theme?: Theme): string[] {
+	const warnings = approval.warnings.length > 0 ? ` ${fg(theme, "warning", approval.warnings.join(" | "))}` : "";
 	return [
-		clampLine(`${index + 1}. ${approval.toolName} for ${approval.agentName} [${approval.status}]`, width),
-		clampLine(`   ${approval.inputSummary}`, width),
-		clampLine(`   ${approval.reason}${warnings}`, width),
+		clampLine(`${fg(theme, "accent", `${index + 1}.`)} ${fg(theme, "toolTitle", approval.toolName)} ${fg(theme, "dim", "for")} ${fg(theme, "text", approval.agentName)} ${fg(theme, "dim", `[${approval.status}]`)}`, width),
+		clampLine(`   ${fg(theme, "muted", approval.inputSummary || "(empty input)")}`, width),
+		clampLine(`   ${fg(theme, "dim", approval.reason)}${warnings}`, width),
 	];
 }
 
-export function renderArtifacts(job: AgentJob | undefined, width: number): string[] {
-	if (!job) return [clampLine("No selected job.", width)];
-	if (job.artifacts.length === 0) return [clampLine("No artifacts found under the job workspace.", width)];
-	return job.artifacts.map((artifact, index) => formatArtifact(artifact, index, width));
+export function renderArtifacts(job: AgentJob | undefined, width: number, theme?: Theme): string[] {
+	if (!job) return [clampLine(fg(theme, "dim", "No selected job."), width)];
+	if (job.artifacts.length === 0) return [clampLine(fg(theme, "dim", "No artifacts found under the job workspace."), width)];
+	return job.artifacts.map((artifact, index) => formatArtifact(artifact, index, width, theme));
 }
 
-function formatArtifact(artifact: AgentArtifact, index: number, width: number): string {
-	return clampLine(`${index + 1}. ${artifact.path} (${artifact.sizeBytes} bytes)`, width);
+function formatArtifact(artifact: AgentArtifact, index: number, width: number, theme?: Theme): string {
+	return clampLine(`${fg(theme, "accent", `${index + 1}.`)} ${fg(theme, "text", artifact.path)} ${fg(theme, "dim", `(${artifact.sizeBytes} bytes)`)}`, width);
 }
 
-export function renderArtifactContent(artifact: AgentArtifact | undefined, width: number, maxLines = 18): string[] {
+export function renderArtifactContent(artifact: AgentArtifact | undefined, width: number, maxLines = 18, theme?: Theme): string[] {
 	if (!artifact) return [];
 	let content: string;
 	try {
 		content = fs.readFileSync(artifact.absolutePath, "utf8");
 	} catch (error) {
-		return [clampLine(`Could not read artifact: ${error instanceof Error ? error.message : String(error)}`, width)];
+		return [clampLine(fg(theme, "error", `Could not read artifact: ${error instanceof Error ? error.message : String(error)}`), width)];
 	}
-	const lines = content.split("\n").slice(0, maxLines);
-	const output = [clampLine(`--- ${artifact.path}`, width), ...lines.map((line) => clampLine(line, width))];
-	if (content.split("\n").length > maxLines) output.push(clampLine("... truncated in dashboard view", width));
+	const rawLines = content.split("\n");
+	const lines = rawLines.slice(0, maxLines);
+	const output = [clampLine(`${fg(theme, "dim", "---")} ${fg(theme, "accent", artifact.path)}`, width), ...lines.map((line) => clampLine(fg(theme, "toolOutput", line), width))];
+	if (rawLines.length > maxLines) output.push(clampLine(fg(theme, "muted", "... truncated in dashboard view"), width));
 	return output;
 }
 
-export function renderHelp(width: number): string[] {
-	return [
-		"Q/Esc close | C create | 1-9 select agent | S start | X abort | R refresh artifacts",
-		"A approve first pending approval | N deny first pending approval",
-		"L logs mode | P approvals mode | D artifact mode | H help | Enter normal mode",
-		"In artifact mode, press 1-9 to preview an artifact for the selected agent.",
-	].map((line) => clampLine(line, width));
+function key(theme: Theme | undefined, value: string): string {
+	return fg(theme, "accent", bold(theme, value));
 }
 
-export function splitColumns(left: string[], right: string[], width: number): string[] {
-	const gap = " │ ";
+function packTokens(tokens: string[], width: number, separator = "  "): string[] {
+	if (width <= 0) return [""];
+	const lines: string[] = [];
+	let current = "";
+	for (const token of tokens) {
+		const candidate = current ? `${current}${separator}${token}` : token;
+		if (visibleWidth(candidate) <= width) {
+			current = candidate;
+			continue;
+		}
+		if (current) lines.push(current);
+		if (visibleWidth(token) > width) lines.push(...wrapPlainLine(token, width));
+		else current = token;
+	}
+	if (current) lines.push(current);
+	return lines.length > 0 ? lines : [""];
+}
+
+export function renderFooterHints(width: number, theme?: Theme): string[] {
+	const hints = [
+		`${key(theme, "C")} create`,
+		`${key(theme, "1-9")} select`,
+		`${key(theme, "S")} start`,
+		`${key(theme, "X")} abort`,
+		`${key(theme, "A/N")} approve/deny`,
+		`${key(theme, "L/P/D")} modes`,
+		`${key(theme, "R")} refresh`,
+		`${key(theme, "H")} help`,
+		`${key(theme, "Q/Esc")} close`,
+	];
+	return packTokens(hints, width).map((line) => padLine(line, width));
+}
+
+export function renderHelp(width: number, theme?: Theme): string[] {
+	const lines = [
+		`${key(theme, "C")} create a task-scoped agent job.`,
+		`${key(theme, "1-9")} select an agent job. In artifact mode, the same keys preview artifacts for the selected agent.`,
+		`${key(theme, "S")} start the selected job; ${key(theme, "X")} abort it.`,
+		`${key(theme, "A")} approve the first pending approval; ${key(theme, "N")} deny it.`,
+		`${key(theme, "L")} logs mode; ${key(theme, "P")} approvals mode; ${key(theme, "D")} artifacts mode; ${key(theme, "Enter")} return to normal mode.`,
+		`${key(theme, "R")} refresh artifact discovery. ${key(theme, "Q/Esc")} close the dashboard.`,
+	];
+	return lines.flatMap((line) => wrapWords(line, width)).map((line) => clampLine(line, width));
+}
+
+export function renderSectionTitle(title: string, width: number, theme?: Theme): string {
+	const rendered = ` ${fg(theme, "toolTitle", bold(theme, title))} `;
+	const fill = Math.max(0, width - visibleWidth(rendered));
+	return clampLine(rendered + fg(theme, "borderMuted", "─".repeat(fill)), width);
+}
+
+export function splitColumns(left: string[], right: string[], width: number, theme?: Theme): string[] {
+	const gap = ` ${border(theme, "│")} `;
 	const leftWidth = Math.max(24, Math.floor(width * 0.38));
-	const rightWidth = Math.max(10, width - leftWidth - gap.length);
+	const rightWidth = Math.max(10, width - leftWidth - visibleWidth(gap));
 	const rows = Math.max(left.length, right.length);
 	const lines: string[] = [];
 	for (let i = 0; i < rows; i++) {
-		lines.push(`${clampLine(left[i] ?? "", leftWidth)}${gap}${clampLine(right[i] ?? "", rightWidth)}`.slice(0, width));
+		lines.push(clampLine(`${padLine(left[i] ?? "", leftWidth)}${gap}${padLine(right[i] ?? "", rightWidth)}`, width));
 	}
 	return lines;
 }

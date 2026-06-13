@@ -1,6 +1,6 @@
 # desgraca-agents
 
-`desgraca-agents` is a pi extension for supervising task-scoped agent jobs from a dedicated dashboard.
+`desgraca-agents` is a pi extension for supervising task-scoped agent jobs from a dedicated, themed TUI dashboard.
 
 ## Commands
 
@@ -8,7 +8,9 @@
 - `/agent-settings` opens agent-scoped permission policy settings.
 - `/agent-policy-cycle <tool>` cycles one agent-scoped tool policy between `allow`, `ask`, and `deny`.
 
-## Dashboard keys
+## Dashboard UI and keys
+
+The `/agents` screen uses a bordered, theme-aware dashboard with an agent list pane, selected-agent detail pane, mode tabs, and wrapped footer hints. Press `H` for the full key reference if the compact footer is not enough.
 
 - `C` create a new job.
 - `1`-`9` select an agent job.

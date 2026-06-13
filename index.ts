@@ -139,7 +139,7 @@ export default function desgracaAgentsExtension(pi: ExtensionAPI) {
 			}
 
 			let dashboard: Dashboard | undefined;
-			await ctx.ui.custom((_tui, _theme, _keybindings, done) => {
+			await ctx.ui.custom((_tui, theme, _keybindings, done) => {
 				dashboard = new Dashboard(
 					store,
 					runner,
@@ -157,6 +157,7 @@ export default function desgracaAgentsExtension(pi: ExtensionAPI) {
 						},
 					},
 					_tui,
+					theme,
 				);
 				return dashboard;
 			});

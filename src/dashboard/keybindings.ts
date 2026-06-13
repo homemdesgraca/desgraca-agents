@@ -15,8 +15,7 @@ export type DashboardAction =
 	| { type: "normal" }
 	| { type: "refresh" };
 
-export const DASHBOARD_HELP_TEXT =
-	"Q/Esc close, C create, 1-9 select, S start, X abort, A approve, N deny, L logs, P approvals, D artifacts, R refresh, H help";
+export const DASHBOARD_HELP_TEXT = "H opens full help. Enter returns to normal mode.";
 
 export function parseDashboardAction(input: string): DashboardAction | undefined {
 	if (matchesKey(input, "escape") || input === "q" || input === "Q") return { type: "close" };
