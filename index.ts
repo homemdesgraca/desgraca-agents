@@ -9,6 +9,7 @@ import { AgentStore } from "./src/agents/agent-store.ts";
 import { PiSubprocessAgentRunner } from "./src/agents/agent-runner.ts";
 import { registerAgentProposalTools } from "./src/agents/proposal-tools.ts";
 import { ArtifactViewer } from "./src/dashboard/artifact-viewer.ts";
+import { ClearAgentDialog } from "./src/dashboard/clear-agent-dialog.ts";
 import { CreateJobDialog, type CreateJobDialogResult } from "./src/dashboard/create-job-dialog.ts";
 import { Dashboard } from "./src/dashboard/Dashboard.ts";
 import { DeleteAgentDialog } from "./src/dashboard/delete-agent-dialog.ts";
@@ -201,6 +202,28 @@ export default function desgracaAgentsExtension(pi: ExtensionAPI) {
 					{
 						close: () => done(undefined),
 						notify: (message, level = "info") => ctx.ui.notify(message, level),
+						clearJob: async (job) => {
+							const ok = await ctx.ui.custom<boolean>(
+								(_dialogTui, dialogTheme, _dialogKeybindings, dialogDone) => new ClearAgentDialog(job, dialogTheme, dialogDone),
+								{
+									overlay: true,
+									overlayOptions: {
+										anchor: "center",
+										width: "85%",
+										minWidth: 52,
+										maxHeight: "60%",
+										margin: 2,
+									},
+								},
+							);
+							if (!ok) {
+								_tui.requestRender();
+								return false;
+							}
+							await store.clear(job.id);
+							_tui.requestRender();
+							return true;
+						},
 						openArtifactViewer: async (job, artifact) => {
 							await ctx.ui.custom<void>(
 								(viewerTui, viewerTheme, _viewerKeybindings, viewerDone) => new ArtifactViewer({

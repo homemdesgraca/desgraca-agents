@@ -12,15 +12,15 @@
 
 The `/agents` screen uses a tall bordered, theme-aware dashboard with an agent list pane, agent description pane, mode tabs, and wrapped footer hints. Press `H` for descriptive help that explains what each dashboard mode shows.
 
-- `G` show AGENTS mode, `T` show TRACKING, `P` show APPROVALS, `F` show ARTIFACTS, and `H` show HELP.
+- `G` show AGENTS mode, `T` show TRACKING, `P` show APPROVALS, `F` show ARTIFACTS, and `H` show HELP. `Q` and `E` walk backward/forward through those modes.
 - `1`-`9` select an agent job in every dashboard mode.
 - `Up` / `Down` scroll the right-hand panel when there is more content than visible space.
-- AGENTS mode: `C` creates a new job, `S` starts it, `X` aborts it, and `Delete` or `Backspace` deletes it after confirmation.
+- AGENTS mode: `C` creates a new job, `S` starts it, `X` aborts it, `K` clears selected-agent output after confirmation, and `Delete` or `Backspace` deletes it after confirmation. Starting an already-started agent suggests clearing it first.
 - TRACKING mode: `M` sends a follow-up message to the selected agent, including after it is `FINISHED`.
 - APPROVALS mode: `A` approves and `N` denies the first pending approval.
 - ARTIFACTS mode: `[` and `]` move between artifacts, `O` or `Enter` opens a large artifact viewer, and `R` refreshes artifact discovery.
 - Artifact viewer: `Up` / `Down` scroll, `A` starts a two-step accept flow for proposal artifacts, `D` shows diff for proposal artifacts, `P` shows the proposal/raw artifact, `O` shows the original file for proposal artifacts, `W` toggles wrapping, and `Q` or `Esc` closes the viewer. The viewer shows both the artifact path and the final path that will be created or changed when accepted.
-- `Q` or `Esc` close the dashboard.
+- `Esc` closes the dashboard.
 
 ## Workspace rule
 

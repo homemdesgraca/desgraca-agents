@@ -3,6 +3,7 @@ import { matchesKey } from "@earendil-works/pi-tui";
 export type DashboardAction =
 	| { type: "close" }
 	| { type: "create" }
+	| { type: "clear" }
 	| { type: "select"; index: number }
 	| { type: "start" }
 	| { type: "abort" }
@@ -13,6 +14,8 @@ export type DashboardAction =
 	| { type: "artifacts" }
 	| { type: "help" }
 	| { type: "normal" }
+	| { type: "previousMode" }
+	| { type: "nextMode" }
 	| { type: "refresh" }
 	| { type: "delete" }
 	| { type: "message" }
@@ -22,11 +25,14 @@ export type DashboardAction =
 	| { type: "scrollUp" }
 	| { type: "scrollDown" };
 
-export const DASHBOARD_HELP_TEXT = "Mode keys: G agents, T tracking, P approvals, F artifacts, H help. Q/Esc closes.";
+export const DASHBOARD_HELP_TEXT = "Mode keys: G/T/P/F/H direct, Q/E walk modes. Esc closes.";
 
 export function parseDashboardAction(input: string): DashboardAction | undefined {
-	if (matchesKey(input, "escape") || input === "q" || input === "Q") return { type: "close" };
+	if (matchesKey(input, "escape") || matchesKey(input, "ctrl+c")) return { type: "close" };
+	if (input === "q" || input === "Q") return { type: "previousMode" };
+	if (input === "e" || input === "E") return { type: "nextMode" };
 	if (input === "c" || input === "C") return { type: "create" };
+	if (input === "k" || input === "K") return { type: "clear" };
 	if (input >= "1" && input <= "9") return { type: "select", index: Number(input) - 1 };
 	if (input === "s" || input === "S") return { type: "start" };
 	if (input === "x" || input === "X") return { type: "abort" };

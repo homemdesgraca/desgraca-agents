@@ -109,6 +109,30 @@ export class AgentStore {
 		return true;
 	}
 
+	async clear(id: string): Promise<AgentJob | undefined> {
+		const job = this.jobs.get(id);
+		if (!job) return undefined;
+		await fs.rm(job.writableRoot, { recursive: true, force: true });
+		await fs.mkdir(job.writableRoot, { recursive: true });
+		const now = Date.now();
+		const cleared: AgentJob = {
+			...job,
+			status: "draft",
+			finalResponse: undefined,
+			logs: [{ id: createId(), timestamp: now, level: "info", message: "Job cleared. Ready to start again." }],
+			tracking: [{ id: createId(), timestamp: now, kind: "status", title: "Job cleared", message: "Previous worker output, artifacts, approvals, final response, and process state were cleared by the user." }],
+			pendingApprovals: [],
+			artifacts: [],
+			startedAt: undefined,
+			finishedAt: undefined,
+			process: undefined,
+			updatedAt: now,
+		};
+		this.jobs.set(id, cleared);
+		this.notify();
+		return cleared;
+	}
+
 	setStatus(id: string, status: AgentJobStatus): AgentJob | undefined {
 		const now = Date.now();
 		return this.update(id, (job) => ({

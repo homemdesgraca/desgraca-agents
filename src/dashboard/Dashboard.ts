@@ -30,9 +30,12 @@ export interface DashboardActions {
 	close(): void;
 	notify(message: string, level?: "info" | "warning" | "error"): void;
 	deleteJob(job: AgentJob): Promise<boolean>;
+	clearJob(job: AgentJob): Promise<boolean>;
 	sendMessage(job: AgentJob): Promise<void>;
 	openArtifactViewer(job: AgentJob, artifact: AgentArtifact): Promise<void>;
 }
+
+const MODE_ORDER: DashboardMode[] = ["normal", "logs", "approvals", "artifacts", "help"];
 
 export class Dashboard implements Component {
 	private mode: DashboardMode = "normal";
@@ -104,9 +107,20 @@ export class Dashboard implements Component {
 				if (!this.requireMode("normal", "Create is available in AGENTS mode. Press G first.")) break;
 				await this.actions.createJob();
 				break;
+			case "clear":
+				if (!this.requireMode("normal", "Clear is available in AGENTS mode. Press G first.")) break;
+				if (!job) this.showNotice("No selected job.", "warning");
+				else if (await this.actions.clearJob(job)) {
+					if (this.runner.isRunning(job.id)) this.runner.abort(job.id);
+					this.artifactPreviewIndex = 0;
+					this.rightScrollOffset = 0;
+					this.showNotice(`Cleared agent ${job.name}.`, "info");
+				}
+				break;
 			case "start":
 				if (!this.requireMode("normal", "Start is available in AGENTS mode. Press G first.")) break;
 				if (!job) this.showNotice("Create or select a job first.", "warning");
+				else if (this.agentHasStartedOutput(job)) this.showNotice("This agent has already been started. Clear it first with K if you want to run it from a blank state.", "warning");
 				else await this.runner.start(job.id);
 				break;
 			case "abort":
@@ -167,6 +181,12 @@ export class Dashboard implements Component {
 				this.artifactPreviewIndex = 0;
 				this.rightScrollOffset = 0;
 				break;
+			case "previousMode":
+				this.walkMode(-1);
+				break;
+			case "nextMode":
+				this.walkMode(1);
+				break;
 			case "refresh":
 				if (this.requireMode("artifacts", "Refresh is available in ARTIFACTS mode. Press F first.")) await this.refreshArtifacts(job);
 				break;
@@ -217,6 +237,17 @@ export class Dashboard implements Component {
 		if (this.mode === mode) return true;
 		this.showNotice(message, "warning");
 		return false;
+	}
+
+	private walkMode(delta: number): void {
+		const current = MODE_ORDER.indexOf(this.mode);
+		const next = (current + delta + MODE_ORDER.length) % MODE_ORDER.length;
+		this.mode = MODE_ORDER[next] ?? "normal";
+		this.rightScrollOffset = this.mode === "logs" ? Number.MAX_SAFE_INTEGER : 0;
+	}
+
+	private agentHasStartedOutput(job: AgentJob): boolean {
+		return !!job.startedAt || !!job.finalResponse || !!job.process || job.artifacts.length > 0 || job.pendingApprovals.length > 0 || job.status !== "draft";
 	}
 
 	private async refreshArtifacts(job: AgentJob | undefined): Promise<void> {

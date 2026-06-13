@@ -75,6 +75,7 @@ before(async () => {
 			"src/agents/agent-store.ts",
 			"src/agents/proposal-tools.ts",
 			"src/dashboard/artifact-viewer.ts",
+			"src/dashboard/clear-agent-dialog.ts",
 			"src/dashboard/Dashboard.ts",
 			"src/dashboard/keybindings.ts",
 			"src/dashboard/render.ts",
@@ -183,6 +184,14 @@ describe("blank-slate MVP foundations", () => {
 			assert.equal(store.get(first.id).status, "done");
 			assert.ok(store.get(first.id).finishedAt);
 			assert.ok(store.get(first.id).logs.some((entry) => entry.message.includes("Approval approved")));
+			await fsp.mkdir(path.join(first.writableRoot, "proposals"), { recursive: true });
+			await fsp.writeFile(path.join(first.writableRoot, "proposals", "old.txt"), "old");
+			const cleared = await store.clear(first.id);
+			assert.equal(cleared.status, "draft");
+			assert.equal(cleared.finalResponse, undefined);
+			assert.equal(cleared.process, undefined);
+			assert.deepEqual(cleared.artifacts, []);
+			assert.equal(fs.existsSync(path.join(first.writableRoot, "proposals", "old.txt")), false);
 			unsubscribe();
 			assert.ok(notifications >= 6);
 		} finally {
@@ -251,6 +260,9 @@ describe("blank-slate MVP foundations", () => {
 			assert.equal(parseDashboardAction("L"), undefined);
 			assert.deepEqual(parseDashboardAction("T"), { type: "logs" });
 			assert.deepEqual(parseDashboardAction("G"), { type: "normal" });
+			assert.deepEqual(parseDashboardAction("Q"), { type: "previousMode" });
+			assert.deepEqual(parseDashboardAction("E"), { type: "nextMode" });
+			assert.deepEqual(parseDashboardAction("K"), { type: "clear" });
 			assert.deepEqual(parseDashboardAction("3"), { type: "select", index: 2 });
 			assert.deepEqual(parseDashboardAction("["), { type: "artifactPrevious" });
 			assert.deepEqual(parseDashboardAction("]"), { type: "artifactNext" });
@@ -258,6 +270,7 @@ describe("blank-slate MVP foundations", () => {
 			assert.deepEqual(parseDashboardAction("\r"), { type: "artifactOpen" });
 			assert.doesNotMatch(renderFooterHints(120, undefined, "artifacts").join("\n"), /approve|deny/);
 			assert.doesNotMatch(renderFooterHints(120, undefined, "normal").join("\n"), /approve|deny/);
+			assert.match(renderFooterHints(120, undefined, "normal").join("\n"), /K clear/);
 			assert.match(renderFooterHints(120, undefined, "approvals").join("\n"), /approve/);
 		} finally {
 			await fsp.rm(cwd, { recursive: true, force: true });
