@@ -21,6 +21,7 @@ import {
 	renderModeTabs,
 	renderSectionTitle,
 	renderTopBorder,
+	renderTracking,
 	splitColumns,
 	type DashboardMode,
 } from "./render.ts";
@@ -30,6 +31,7 @@ export interface DashboardActions {
 	close(): void;
 	notify(message: string, level?: "info" | "warning" | "error"): void;
 	deleteJob(job: AgentJob): Promise<boolean>;
+	sendMessage(job: AgentJob): Promise<void>;
 }
 
 export class Dashboard implements Component {
@@ -113,6 +115,13 @@ export class Dashboard implements Component {
 					if (this.runner.isRunning(job.id)) this.runner.abort(job.id);
 					this.rightScrollOffset = 0;
 					this.showNotice(`Deleted agent ${job.name}.`, "info");
+				}
+				break;
+			case "message":
+				if (!job) this.showNotice("No selected job.", "warning");
+				else {
+					this.mode = "logs";
+					await this.actions.sendMessage(job);
 				}
 				break;
 			case "approve":
@@ -209,8 +218,8 @@ export class Dashboard implements Component {
 		let rightTitleText: string;
 		let right: string[];
 		if (this.mode === "logs") {
-			rightTitleText = "Logs";
-			right = [renderSectionTitle(rightTitleText, rightWidth, theme), ...renderLogs(selected, rightWidth, 18, theme, { wrap: true })];
+			rightTitleText = "Tracking";
+			right = [renderSectionTitle(rightTitleText, rightWidth, theme), ...renderTracking(selected, rightWidth, theme)];
 		} else if (this.mode === "approvals") {
 			rightTitleText = "Approvals";
 			right = [renderSectionTitle(rightTitleText, rightWidth, theme), ...renderApprovals(selected, rightWidth, theme)];

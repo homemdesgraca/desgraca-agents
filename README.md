@@ -21,7 +21,8 @@ The `/agents` screen uses a tall bordered, theme-aware dashboard with an agent l
 - `A` approve the first pending approval.
 - `N` deny the first pending approval.
 - `Enter` return to the main `AGENTS` screen.
-- `L` show wrapped logs, including the full child subprocess launch command and final response output.
+- `L` show TRACKING: a readable timeline of user messages, worker responses, status changes, tool activity, and final response output.
+- `M` send a follow-up message to the selected agent from TRACKING, including after it is `FINISHED`.
 - `P` show approvals.
 - `D` show artifacts; in artifact mode, `1`-`9` previews an artifact.
 - `R` refresh artifacts.

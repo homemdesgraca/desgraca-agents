@@ -10,6 +10,19 @@ export interface AgentLogEntry {
 	message: string;
 }
 
+export type AgentTrackingEntryKind = "user" | "assistant" | "tool" | "status" | "error";
+
+export interface AgentTrackingEntry {
+	id: string;
+	timestamp: number;
+	kind: AgentTrackingEntryKind;
+	title: string;
+	message?: string;
+	toolName?: string;
+	input?: string;
+	output?: string;
+}
+
 export interface AgentApproval {
 	id: string;
 	agentId: string;
@@ -60,6 +73,7 @@ export interface AgentJob {
 	readableRoot: string;
 	writableRoot: string;
 	logs: AgentLogEntry[];
+	tracking: AgentTrackingEntry[];
 	pendingApprovals: AgentApproval[];
 	artifacts: AgentArtifact[];
 	createdAt: number;
@@ -109,6 +123,15 @@ export function createAgentJob(cwd: string, name: string, task: string, model?: 
 				timestamp: now,
 				level: "info",
 				message: "Job created.",
+			},
+		],
+		tracking: [
+			{
+				id: createId(),
+				timestamp: now,
+				kind: "status",
+				title: "Job created",
+				message: "Waiting for the user to start this worker.",
 			},
 		],
 		pendingApprovals: [],

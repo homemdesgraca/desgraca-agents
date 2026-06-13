@@ -10,7 +10,7 @@ type BgColor = Parameters<Theme["bg"]>[0];
 
 const MODE_LABELS: Record<DashboardMode, string> = {
 	normal: "AGENTS",
-	logs: "LOGS",
+	logs: "TRACKING",
 	approvals: "APPROVALS",
 	artifacts: "ARTIFACTS",
 	help: "HELP",
@@ -130,7 +130,7 @@ export function formatStatusLabel(status: AgentJob["status"], theme?: Theme): st
 		case "failed":
 			return fg(theme, "error", label);
 		case "done":
-			return fg(theme, "success", label);
+			return fg(theme, "success", "FINISHED");
 		case "aborted":
 			return fg(theme, "muted", label);
 		case "waiting":
@@ -198,7 +198,7 @@ function renderFinalResponse(job: AgentJob, width: number, theme?: Theme): strin
 	const wrapped = job.finalResponse.split("\n").flatMap((line) => wrapWords(line || " ", valueWidth));
 	const truncated = wrapped.length > 4;
 	const visible = wrapped.slice(0, 4);
-	if (truncated) visible[visible.length - 1] = "… check Logs mode for full output.";
+	if (truncated) visible[visible.length - 1] = "… check TRACKING for full output.";
 	return visible.map((line, index) => {
 		const prefix = index === 0 ? labelText : " ".repeat(labelWidth);
 		return clampLine(prefix + fg(theme, "text", line), width);
@@ -243,6 +243,26 @@ export function renderLogs(job: AgentJob | undefined, width: number, count = 12,
 				return clampLine(`${wrappedPrefix}${fg(theme, "toolOutput", part)}`, width);
 			});
 		});
+	});
+}
+
+export function renderTracking(job: AgentJob | undefined, width: number, theme?: Theme): string[] {
+	if (!job) return [clampLine(fg(theme, "dim", "No selected job."), width)];
+	if (!job.tracking || job.tracking.length === 0) return renderLogs(job, width, 18, theme, { wrap: true });
+	return job.tracking.flatMap((entry) => {
+		const kindColor: FgColor = entry.kind === "assistant" ? "success" : entry.kind === "user" ? "accent" : entry.kind === "tool" ? "toolTitle" : entry.kind === "error" ? "error" : "muted";
+		const lines = [clampLine(`${fg(theme, "dim", formatTime(entry.timestamp))} ${fg(theme, kindColor, bold(theme, entry.title))}`, width)];
+		if (entry.message) lines.push(...wrapWords(entry.message, Math.max(8, width - 2)).map((line) => clampLine(`  ${fg(theme, "toolOutput", line)}`, width)));
+		if (entry.input) {
+			lines.push(clampLine(`  ${fg(theme, "dim", "Input:")}`, width));
+			lines.push(...entry.input.split("\n").flatMap((line) => wrapWords(line, Math.max(8, width - 4))).map((line) => clampLine(`    ${fg(theme, "muted", line)}`, width)));
+		}
+		if (entry.output) {
+			lines.push(clampLine(`  ${fg(theme, "dim", "Output:")}`, width));
+			lines.push(...entry.output.split("\n").flatMap((line) => wrapWords(line, Math.max(8, width - 4))).map((line) => clampLine(`    ${fg(theme, "toolOutput", line)}`, width)));
+		}
+		lines.push("");
+		return lines;
 	});
 }
 
@@ -318,6 +338,7 @@ export function renderFooterHints(width: number, theme?: Theme): string[] {
 		`${key(theme, "A/N")} approve/deny`,
 		`${key(theme, "Del")} delete`,
 		`${key(theme, "↑/↓")} scroll`,
+		`${key(theme, "M")} message`,
 		`${key(theme, "L/P/D")} modes`,
 		`${key(theme, "R")} refresh`,
 		`${key(theme, "H")} help`,
@@ -336,14 +357,14 @@ export function renderHelp(width: number, theme?: Theme): string[] {
 		"",
 		heading("Job actions"),
 		`${key(theme, "C")} create a task-scoped agent job. Opens an empty overlay for the worker name, model, and task; cancelling returns to this dashboard without creating anything.`,
-		`${key(theme, "S")} start the selected job in its isolated workspace. ${key(theme, "X")} aborts the selected job if it is running.`,
+		`${key(theme, "S")} start the selected job in its isolated workspace. ${key(theme, "X")} aborts the selected job if it is running. ${key(theme, "M")} sends a follow-up message from TRACKING.`,
 		`${key(theme, "Del/Backspace")} deletes the selected agent job after confirmation and removes its .agents workspace.`,
 		`${key(theme, "A")} approves the first pending approval for the selected agent. ${key(theme, "N")} denies it.`,
 		`${key(theme, "R")} refreshes artifact discovery for the selected agent.`,
 		"",
 		heading("Dashboard modes"),
 		`${key(theme, "Agents mode")} shows the selected agent's identity, status, readable root, writable root, allowed tools, model, task, final response preview, process state, and recent logs.`,
-		`${key(theme, "Logs mode")} shows wrapped worker events, subprocess output summaries, status changes, final responses, and refresh messages.`,
+		`${key(theme, "Tracking mode")} shows a readable timeline of user messages, worker responses, status changes, and detailed tool activity. Use ${key(theme, "M")} to keep talking to a finished worker.`,
 		`${key(theme, "Approvals mode")} shows pending sensitive tool requests for the selected agent, including tool name, input summary, policy reason, and simple risk warnings.`,
 		`${key(theme, "Artifacts mode")} lists files discovered under the selected agent's .agents workspace. Press ${key(theme, "1-9")} in this mode to preview an artifact without applying it to the project.`,
 		`${key(theme, "Help mode")} is this reference view with grouped navigation, job actions, and mode descriptions.`,

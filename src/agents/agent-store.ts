@@ -1,6 +1,6 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import type { AgentApproval, AgentArtifact, AgentJob, AgentJobStatus, AgentLogEntry, AgentModelSelection } from "./agent-job.ts";
+import type { AgentApproval, AgentArtifact, AgentJob, AgentJobStatus, AgentLogEntry, AgentModelSelection, AgentTrackingEntry } from "./agent-job.ts";
 import { createAgentJob, createId, getAgentsRoot } from "./agent-job.ts";
 
 const JOB_STATE_FILE = "agent-job.json";
@@ -125,6 +125,12 @@ export class AgentStore {
 		return entry;
 	}
 
+	appendTracking(id: string, tracking: Omit<AgentTrackingEntry, "id" | "timestamp">): AgentTrackingEntry | undefined {
+		const entry: AgentTrackingEntry = { ...tracking, id: createId(), timestamp: Date.now() };
+		this.update(id, (job) => ({ ...job, tracking: [...(job.tracking ?? []), entry].slice(-500) }));
+		return entry;
+	}
+
 	appendApproval(id: string, approval: Omit<AgentApproval, "id" | "createdAt" | "status">): AgentApproval | undefined {
 		const entry: AgentApproval = {
 			...approval,
@@ -177,6 +183,7 @@ export class AgentStore {
 		const now = Date.now();
 		const status = job.status === "running" ? "waiting" : job.status || "draft";
 		const logs = Array.isArray(job.logs) ? job.logs : [];
+		const tracking = Array.isArray(job.tracking) ? job.tracking : logs.map((log) => ({ id: log.id, timestamp: log.timestamp, kind: log.level === "error" ? "error" as const : "status" as const, title: log.level, message: log.message }));
 		const restoredLog = job.status === "running"
 			? [{ id: createId(), timestamp: now, level: "warning" as const, message: "Restored from disk; previous running subprocess is no longer attached." }]
 			: [];
@@ -187,6 +194,7 @@ export class AgentStore {
 			writableRoot,
 			allowedTools: Array.isArray(job.allowedTools) ? job.allowedTools : ["read", "grep", "find", "ls"],
 			logs: [...logs, ...restoredLog],
+			tracking: [...tracking, ...restoredLog.map((log) => ({ id: createId(), timestamp: log.timestamp, kind: "status" as const, title: "Restored", message: log.message }))],
 			pendingApprovals: Array.isArray(job.pendingApprovals) ? job.pendingApprovals : [],
 			artifacts: Array.isArray(job.artifacts) ? job.artifacts : [],
 			createdAt: job.createdAt ?? now,

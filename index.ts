@@ -9,6 +9,7 @@ import { PiSubprocessAgentRunner } from "./src/agents/agent-runner.ts";
 import { CreateJobDialog, type CreateJobDialogResult } from "./src/dashboard/create-job-dialog.ts";
 import { Dashboard } from "./src/dashboard/Dashboard.ts";
 import { DeleteAgentDialog } from "./src/dashboard/delete-agent-dialog.ts";
+import { TrackingMessageDialog } from "./src/dashboard/tracking-message-dialog.ts";
 import { decideToolPolicy } from "./src/permissions/policies.ts";
 import { checkAgentReadScope, checkAgentWriteScope } from "./src/permissions/scope-guard.ts";
 import { createDefaultSettings, cycleToolPolicy, knownPolicyTools, setToolPolicy, type AgentExtensionSettings, type ToolPolicy } from "./src/settings/settings.ts";
@@ -163,6 +164,26 @@ export default function desgracaAgentsExtension(pi: ExtensionAPI) {
 					{
 						close: () => done(undefined),
 						notify: (message, level = "info") => ctx.ui.notify(message, level),
+						sendMessage: async (job) => {
+							const message = await ctx.ui.custom<string | undefined>(
+								(dialogTui, dialogTheme, _dialogKeybindings, dialogDone) => new TrackingMessageDialog(dialogTui, dialogTheme, dialogDone, job.name),
+								{
+									overlay: true,
+									overlayOptions: {
+										anchor: "center",
+										width: "90%",
+										minWidth: 54,
+										maxHeight: "80%",
+										margin: 2,
+									},
+								},
+							);
+							if (!message) {
+								_tui.requestRender();
+								return;
+							}
+							await runner.send(job.id, message);
+						},
 						deleteJob: async (job) => {
 							const ok = await ctx.ui.custom<boolean>(
 								(_dialogTui, dialogTheme, _dialogKeybindings, dialogDone) => new DeleteAgentDialog(job, dialogTheme, dialogDone),

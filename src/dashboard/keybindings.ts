@@ -15,6 +15,7 @@ export type DashboardAction =
 	| { type: "normal" }
 	| { type: "refresh" }
 	| { type: "delete" }
+	| { type: "message" }
 	| { type: "scrollUp" }
 	| { type: "scrollDown" };
 
@@ -26,6 +27,7 @@ export function parseDashboardAction(input: string): DashboardAction | undefined
 	if (input >= "1" && input <= "9") return { type: "select", index: Number(input) - 1 };
 	if (input === "s" || input === "S") return { type: "start" };
 	if (input === "x" || input === "X") return { type: "abort" };
+	if (input === "m" || input === "M") return { type: "message" };
 	if (input === "a" || input === "A") return { type: "approve" };
 	if (input === "n" || input === "N") return { type: "deny" };
 	if (input === "l" || input === "L") return { type: "logs" };

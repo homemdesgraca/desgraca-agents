@@ -10,6 +10,7 @@ import type { AgentExtensionSettings } from "../settings/settings.ts";
 
 export interface AgentRunner {
 	start(jobId: string): Promise<void>;
+	send(jobId: string, message: string): Promise<void>;
 	abort(jobId: string): void;
 	isRunning(jobId: string): boolean;
 }
@@ -17,6 +18,12 @@ export interface AgentRunner {
 interface RunningProcess {
 	process: ChildProcess;
 	aborted: boolean;
+}
+
+function stringifyCompact(value: unknown): string | undefined {
+	if (value === undefined || value === null) return undefined;
+	const text = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+	return text.length > 2000 ? `${text.slice(0, 2000)}\n... truncated` : text;
 }
 
 function getPiInvocation(args: string[]): { command: string; args: string[] } {
@@ -83,25 +90,30 @@ export class PiSubprocessAgentRunner implements AgentRunner {
 	}
 
 	async start(jobId: string): Promise<void> {
+		await this.run(jobId);
+	}
+
+	async send(jobId: string, message: string): Promise<void> {
+		const trimmed = message.trim();
+		if (!trimmed) return;
+		this.store.appendTracking(jobId, { kind: "user", title: "User message", message: trimmed });
+		this.store.appendLog(jobId, `User message:\n${trimmed}`);
+		await this.run(jobId, trimmed);
+	}
+
+	private async run(jobId: string, followUp?: string): Promise<void> {
 		const job = this.store.get(jobId);
 		if (!job) return;
 		if (this.running.has(jobId)) {
 			this.store.appendLog(jobId, "Job is already running.", "warning");
+			this.store.appendTracking(jobId, { kind: "status", title: "Already running", message: "Wait for the current worker turn to finish before sending another message." });
 			return;
 		}
 
 		await ensureDirectory(job.writableRoot);
 		const settings = this.getSettings();
 		const safeTools = (job.allowedTools.length > 0 ? job.allowedTools : settings.childRunnerTools).join(",");
-		const prompt = [
-			`You are an isolated task-scoped worker named ${job.name}.`,
-			`Main project root: ${job.readableRoot}`,
-			`Writable artifact workspace: ${job.writableRoot}`,
-			"For this MVP runner you are limited to safe read/search tools only. Do not attempt direct project mutations.",
-			"Produce implementation notes, patch proposals, or artifact instructions in your final response.",
-			"Task:",
-			job.task,
-		].join("\n");
+		const prompt = this.buildPrompt(job, followUp);
 
 		const modelArgs = job.model ? ["--model", `${job.model.provider}/${job.model.id}`] : [];
 		const args = ["--mode", "json", "-p", "--no-session", ...modelArgs, "--tools", safeTools, prompt];
@@ -109,6 +121,7 @@ export class PiSubprocessAgentRunner implements AgentRunner {
 		const loggedArgs = invocation.args.map((arg) => (arg === prompt ? "<task prompt>" : arg));
 		this.store.setStatus(jobId, "running");
 		this.store.appendLog(jobId, `Starting read-only subprocess: ${invocation.command} ${loggedArgs.join(" ")}`);
+		this.store.appendTracking(jobId, { kind: "status", title: followUp ? "Sending message" : "Worker started", message: `${invocation.command} ${loggedArgs.join(" ")}` });
 		this.store.update(jobId, {
 			process: {
 				command: invocation.command,
@@ -136,18 +149,22 @@ export class PiSubprocessAgentRunner implements AgentRunner {
 		const processJsonLine = (line: string) => {
 			if (!line.trim()) return;
 			try {
-				const event = JSON.parse(line) as { type?: string; message?: any; toolName?: string; error?: string };
+				const event = JSON.parse(line) as Record<string, any>;
 				if (event.type === "message_end" && event.message?.role === "assistant") {
 					const text = event.message.content?.find?.((part: any) => part.type === "text")?.text;
 					if (text) {
 						this.store.update(jobId, { finalResponse: text });
 						this.store.appendLog(jobId, `Final response:\n${text}`);
+						this.store.appendTracking(jobId, { kind: "assistant", title: "Final response", message: text });
 					}
 				}
-				if (event.type === "tool_execution_start" && event.toolName) {
-					this.store.appendLog(jobId, `Child tool: ${event.toolName}`, "debug");
+				if (typeof event.type === "string" && event.type.includes("tool")) {
+					this.recordToolEvent(jobId, event);
 				}
-				if (event.error) this.store.appendLog(jobId, String(event.error), "error");
+				if (event.error) {
+					this.store.appendLog(jobId, String(event.error), "error");
+					this.store.appendTracking(jobId, { kind: "error", title: "Worker error", message: String(event.error) });
+				}
 			} catch {
 				this.store.appendLog(jobId, line.slice(0, 500), "debug");
 			}
@@ -173,9 +190,47 @@ export class PiSubprocessAgentRunner implements AgentRunner {
 				process: { ...current.process, exitedAt: Date.now(), exitCode: code, signal },
 			}));
 			this.store.setStatus(jobId, nextStatus);
-			this.store.appendLog(jobId, `Subprocess ${nextStatus} (exit ${code ?? "signal"}).`);
+			const title = nextStatus === "done" ? "FINISHED" : nextStatus.toUpperCase();
+			this.store.appendLog(jobId, `Subprocess ${title} (exit ${code ?? "signal"}).`);
+			this.store.appendTracking(jobId, { kind: nextStatus === "failed" ? "error" : "status", title, message: `Worker turn ended with ${code ?? signal ?? "unknown"}. You can send another message from TRACKING.` });
 			const latest = this.store.get(jobId);
 			if (latest) this.store.setArtifacts(jobId, await discoverArtifacts(latest));
+		});
+	}
+
+	private buildPrompt(job: AgentJob, followUp?: string): string {
+		const base = [
+			`You are an isolated task-scoped worker named ${job.name}.`,
+			`Main project root: ${job.readableRoot}`,
+			`Writable artifact workspace: ${job.writableRoot}`,
+			"For this MVP runner you are limited to safe read/search tools only. Do not attempt direct project mutations.",
+			"Produce implementation notes, patch proposals, or artifact instructions in your final response.",
+			"Task:",
+			job.task,
+		];
+		if (!followUp) return base.join("\n");
+		return [
+			...base,
+			"Previous final response:",
+			job.finalResponse || "(none yet)",
+			"User follow-up:",
+			followUp,
+		].join("\n");
+	}
+
+	private recordToolEvent(jobId: string, event: Record<string, any>): void {
+		const toolName = String(event.toolName ?? event.name ?? event.tool?.name ?? "tool");
+		const phase = String(event.type ?? "tool event").replace(/_/g, " ");
+		const input = stringifyCompact(event.input ?? event.args ?? event.toolInput ?? event.params ?? event.tool?.input);
+		const output = stringifyCompact(event.output ?? event.result ?? event.content ?? event.error);
+		this.store.appendLog(jobId, `Tool ${phase}: ${toolName}${input ? `\nInput: ${input}` : ""}${output ? `\nOutput: ${output}` : ""}`, event.error ? "error" : "debug");
+		this.store.appendTracking(jobId, {
+			kind: "tool",
+			title: `Tool: ${toolName}`,
+			toolName,
+			message: phase,
+			input,
+			output,
 		});
 	}
 
