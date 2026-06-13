@@ -15,12 +15,15 @@ export const DEFAULT_TOOL_POLICIES: Record<string, ToolPolicy> = {
 	agent_write_proposal: "allow",
 	agent_edit_proposal: "allow",
 	agent_view_artifacts: "allow",
+	agent_create_note: "allow",
+	agent_edit_note: "allow",
+	agent_view_notes: "allow",
 };
 
 export function createDefaultSettings(): AgentExtensionSettings {
 	return {
 		toolPolicies: { ...DEFAULT_TOOL_POLICIES },
-		childRunnerTools: ["read", "grep", "find", "ls", "agent_write_proposal", "agent_edit_proposal", "agent_view_artifacts"],
+		childRunnerTools: ["read", "grep", "find", "ls", "agent_write_proposal", "agent_edit_proposal", "agent_view_artifacts", "agent_create_note", "agent_edit_note", "agent_view_notes"],
 		taskWorkspaceDir: ".agents",
 	};
 }

@@ -131,7 +131,7 @@ export class PiSubprocessAgentRunner implements AgentRunner {
 		const loggedArgs = invocation.args.map((arg) => (arg === prompt ? "<task prompt>" : arg));
 		this.store.setStatus(jobId, "running");
 		this.store.appendLog(jobId, `Starting isolated subprocess: ${invocation.command} ${loggedArgs.join(" ")}`);
-		this.store.appendTracking(jobId, { kind: "status", title: followUp ? "Sending message" : "Worker started", message: `Isolated worker process started. It may write reviewable artifacts only under ${job.writableRoot}.\n${invocation.command} ${loggedArgs.join(" ")}` });
+		this.store.appendTracking(jobId, { kind: "status", title: followUp ? "Sending message" : "Worker started", message: `Isolated worker process started. Use agent-specific tools for proposals, artifacts, and notes.\n${invocation.command} ${loggedArgs.join(" ")}` });
 		this.store.update(jobId, {
 			process: {
 				command: invocation.command,
@@ -213,15 +213,13 @@ export class PiSubprocessAgentRunner implements AgentRunner {
 		const base = [
 			`You are an isolated task-scoped worker named ${job.name}.`,
 			`Main project root: ${job.readableRoot}`,
-			`Writable artifact workspace: ${job.writableRoot}`,
 			"You may read/search the main project, but you must not directly modify files in the main project tree.",
-			`You CAN and SHOULD write reviewable artifacts, notes, plans, patch proposals, or generated files inside your isolated writable workspace: ${job.writableRoot}`,
-			"Use agent_write_proposal when you need to create a full-file proposal for an original project file. Provide only originalPath and content; the tool writes to the correct .agents proposals path automatically.",
+			"The generic write and edit tools are intentionally not available to worker agents. Do not try to use them.",
+			"Use agent_write_proposal when you need to create a full-file proposal for an original project file. Provide only originalPath and content; the tool stores the proposal for user review.",
 			"Use agent_edit_proposal when you need to derive a proposal from an existing project file with exact oldText/newText replacements. It reads the original, writes an isolated proposal, and never mutates the project file.",
 			"Use agent_view_artifacts to list current isolated artifacts or inspect a specific artifact/proposal diff. If you want to check your generated changes, inspect artifacts with that tool instead of reading the original project file and expecting it to be changed.",
-			"Proposal files are stored under .agents/{AGENT_NAME}/proposals/ with the original project structure mirrored beneath it.",
-			"The generic write and edit tools are intentionally not available to worker agents. Do not try to use them.",
-			"The user will inspect these artifacts before applying anything to the real project.",
+			"Use agent_create_note, agent_edit_note, and agent_view_notes when you need to record, revise, list, or read notes. The note tools manage note files for you.",
+			"The user will inspect proposals before applying anything to the real project.",
 			"If you need to change project code, create a proposal with agent_write_proposal or agent_edit_proposal instead of editing the main project directly.",
 			"Task:",
 			job.task,

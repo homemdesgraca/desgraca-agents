@@ -122,7 +122,157 @@ async function resolveArtifactPath(cwd: string, writableRoot: string, inputPath:
 	throw new Error(`Artifact not found in ${root}: ${inputPath}`);
 }
 
+function getNotesRoot(cwd: string): string {
+	return path.resolve(cwd, ".agents", "notes");
+}
+
+function normalizeNoteFileName(note: string): string {
+	const trimmed = note.trim();
+	if (!trimmed) throw new Error("Note name is required.");
+	if (path.isAbsolute(trimmed) || trimmed.includes("/") || trimmed.includes("\\")) {
+		throw new Error("Note names must be plain names, not paths.");
+	}
+	const sanitized = trimmed
+		.replace(/[^a-zA-Z0-9._-]+/g, "-")
+		.replace(/^[.-]+|[.-]+$/g, "")
+		.slice(0, 100);
+	if (!sanitized || sanitized === "." || sanitized === "..") throw new Error("Note name is invalid after sanitization.");
+	return /\.(md|txt)$/i.test(sanitized) ? sanitized : `${sanitized}.md`;
+}
+
+function resolveNotePath(cwd: string, note: string): { root: string; fileName: string; absolutePath: string } {
+	const root = getNotesRoot(cwd);
+	const fileName = normalizeNoteFileName(note);
+	const absolutePath = path.resolve(root, fileName);
+	if (!isPathInside(root, absolutePath)) throw new Error("Note path resolved outside the notes area.");
+	return { root, fileName, absolutePath };
+}
+
+async function listNotes(cwd: string): Promise<Array<{ fileName: string; sizeBytes: number; updatedAt: number }>> {
+	const root = getNotesRoot(cwd);
+	let entries: any[];
+	try {
+		entries = await fs.readdir(root, { withFileTypes: true });
+	} catch {
+		return [];
+	}
+	const notes: Array<{ fileName: string; sizeBytes: number; updatedAt: number }> = [];
+	for (const entry of entries) {
+		if (!entry.isFile()) continue;
+		const fileName = entry.name;
+		const absolutePath = path.resolve(root, fileName);
+		if (!isPathInside(root, absolutePath)) continue;
+		const stat = await fs.stat(absolutePath);
+		notes.push({ fileName, sizeBytes: stat.size, updatedAt: stat.mtimeMs });
+	}
+	return notes.sort((a, b) => a.fileName.localeCompare(b.fileName));
+}
+
 export function registerAgentProposalTools(pi: ExtensionAPI): void {
+	pi.registerTool({
+		name: "agent_create_note",
+		label: "Agent Create Note",
+		description: "Create or replace a named note for agent coordination and review.",
+		promptSnippet: "Create a named note with content",
+		promptGuidelines: [
+			"Use agent_create_note when an isolated worker needs to record notes, plans, findings, or handoff details.",
+			"Provide a concise note name and the note content; the tool manages note files for you.",
+		],
+		parameters: Type.Object({
+			name: Type.String({ description: "Plain note name. The tool sanitizes it and manages the file extension." }),
+			content: Type.String({ description: "Full note content." }),
+			description: Type.Optional(Type.String({ description: "Short reason or summary for this note." })),
+		}),
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			const agent = getAgentProcessEnvContext();
+			if (!agent?.writableRoot) throw new Error("agent_create_note is only available inside a marked desgraca-agents worker process.");
+			const note = resolveNotePath(ctx.cwd, params.name);
+			await withFileMutationQueue(note.absolutePath, async () => {
+				await fs.mkdir(note.root, { recursive: true });
+				await fs.writeFile(note.absolutePath, params.content, "utf8");
+			});
+			return {
+				content: [{ type: "text" as const, text: `Created note ${note.fileName}.` }],
+				details: { note: note.fileName, description: params.description },
+			};
+		},
+	});
+
+	pi.registerTool({
+		name: "agent_view_notes",
+		label: "Agent View Notes",
+		description: "List available notes, or read a specific note by name.",
+		promptSnippet: "List notes or read a named note",
+		promptGuidelines: [
+			"Use agent_view_notes without a note name to list available notes.",
+			"Use agent_view_notes with a note name to read that specific note.",
+		],
+		parameters: Type.Object({
+			note: Type.Optional(Type.String({ description: "Optional plain note name to read." })),
+		}),
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			const agent = getAgentProcessEnvContext();
+			if (!agent?.writableRoot) throw new Error("agent_view_notes is only available inside a marked desgraca-agents worker process.");
+			if (!params.note?.trim()) {
+				const notes = await listNotes(ctx.cwd);
+				const text = notes.length === 0
+					? "No notes found."
+					: notes.map((note, index) => `${index + 1}. ${note.fileName} (${note.sizeBytes} bytes)`).join("\n");
+				return { content: [{ type: "text" as const, text }], details: { count: notes.length } };
+			}
+			const note = resolveNotePath(ctx.cwd, params.note);
+			let content: string;
+			try {
+				content = await fs.readFile(note.absolutePath, "utf8");
+			} catch {
+				throw new Error(`Note not found: ${note.fileName}`);
+			}
+			return { content: [{ type: "text" as const, text: `Note: ${note.fileName}\n\n${truncateText(content)}` }], details: { note: note.fileName } };
+		},
+	});
+
+	pi.registerTool({
+		name: "agent_edit_note",
+		label: "Agent Edit Note",
+		description: "Edit an existing named note with exact text replacements.",
+		promptSnippet: "Apply exact replacements to a named note",
+		promptGuidelines: [
+			"Use agent_edit_note when an isolated worker needs to revise an existing note.",
+			"Each oldText must match exactly once in the current note content; no changes are written if a replacement is ambiguous.",
+		],
+		parameters: Type.Object({
+			note: Type.String({ description: "Plain note name to edit." }),
+			edits: Type.Array(
+				Type.Object({
+					oldText: Type.String({ description: "Exact text to replace. Must match uniquely in the current note content." }),
+					newText: Type.String({ description: "Replacement text." }),
+				}),
+				{ minItems: 1 },
+			),
+			description: Type.Optional(Type.String({ description: "Short reason or summary for this note edit." })),
+		}),
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			const agent = getAgentProcessEnvContext();
+			if (!agent?.writableRoot) throw new Error("agent_edit_note is only available inside a marked desgraca-agents worker process.");
+			const note = resolveNotePath(ctx.cwd, params.note);
+			let content = await fs.readFile(note.absolutePath, "utf8");
+			for (const [index, edit] of params.edits.entries()) {
+				const matches = countOccurrences(content, edit.oldText);
+				if (matches !== 1) {
+					throw new Error(`Edit ${index + 1} for ${note.fileName} expected exactly one match, found ${matches}. No note was changed.`);
+				}
+				content = content.replace(edit.oldText, edit.newText);
+			}
+			await withFileMutationQueue(note.absolutePath, async () => {
+				await fs.writeFile(note.absolutePath, content, "utf8");
+			});
+			return {
+				content: [{ type: "text" as const, text: `Updated note ${note.fileName}.` }],
+				details: { note: note.fileName, edits: params.edits.length, description: params.description },
+			};
+		},
+	});
+
 	pi.registerTool({
 		name: "agent_write_proposal",
 		label: "Agent Write Proposal",

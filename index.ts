@@ -19,7 +19,7 @@ import { checkAgentReadScope, checkAgentWriteScope, isPathInside } from "./src/p
 import { createDefaultSettings, cycleToolPolicy, knownPolicyTools, setToolPolicy, type AgentExtensionSettings, type ToolPolicy } from "./src/settings/settings.ts";
 
 const SETTINGS_ENTRY = "desgraca-agents-settings";
-const PROPOSAL_TOOL_NAMES = ["agent_write_proposal", "agent_edit_proposal", "agent_view_artifacts"];
+const AGENT_ONLY_TOOL_NAMES = ["agent_write_proposal", "agent_edit_proposal", "agent_view_artifacts", "agent_create_note", "agent_edit_note", "agent_view_notes"];
 
 function normalizeSettings(saved: Partial<AgentExtensionSettings> = {}): AgentExtensionSettings {
 	const defaults = createDefaultSettings();
@@ -27,7 +27,7 @@ function normalizeSettings(saved: Partial<AgentExtensionSettings> = {}): AgentEx
 		...defaults,
 		...saved,
 		toolPolicies: Object.fromEntries(Object.entries({ ...defaults.toolPolicies, ...(saved.toolPolicies ?? {}) }).filter(([tool]) => tool !== "write" && tool !== "edit")),
-		childRunnerTools: Array.from(new Set([...(saved.childRunnerTools ?? defaults.childRunnerTools), ...PROPOSAL_TOOL_NAMES])).filter((tool) => tool !== "write" && tool !== "edit"),
+		childRunnerTools: Array.from(new Set([...(saved.childRunnerTools ?? defaults.childRunnerTools), ...AGENT_ONLY_TOOL_NAMES])).filter((tool) => tool !== "write" && tool !== "edit"),
 	};
 }
 
@@ -358,7 +358,7 @@ export default function desgracaAgentsExtension(pi: ExtensionAPI) {
 			await ctx.ui.custom((_tui, theme, _kb, done) => {
 				const container = new Container();
 				container.addChild(new Text(theme.fg("accent", theme.bold("desgraca-agents permission settings")), 1, 0));
-				container.addChild(new Text(theme.fg("dim", "Toggle policies between allow, ask, and deny. Proposal and artifact-view tools are agent-only; bash remains sensitive if enabled."), 1, 0));
+				container.addChild(new Text(theme.fg("dim", "Toggle policies between allow, ask, and deny. Proposal, artifact-view, and note tools are agent-only; bash remains sensitive if enabled."), 1, 0));
 				const items: SettingItem[] = tools.map((tool) => ({
 					id: tool,
 					label: tool,

@@ -102,7 +102,7 @@ after(async () => {
 });
 
 describe("blank-slate MVP foundations", () => {
-	test("default policies allow read/search/proposal tools and do not expose write/edit", async () => {
+	test("default policies allow read/search/agent-only tools and do not expose write/edit", async () => {
 		const { createDefaultSettings } = await importCompiled("src/settings/settings.js");
 		const settings = createDefaultSettings();
 		assert.equal(settings.toolPolicies.read, "allow");
@@ -115,7 +115,10 @@ describe("blank-slate MVP foundations", () => {
 		assert.equal(settings.toolPolicies.agent_write_proposal, "allow");
 		assert.equal(settings.toolPolicies.agent_edit_proposal, "allow");
 		assert.equal(settings.toolPolicies.agent_view_artifacts, "allow");
-		assert.deepEqual(settings.childRunnerTools, ["read", "grep", "find", "ls", "agent_write_proposal", "agent_edit_proposal", "agent_view_artifacts"]);
+		assert.equal(settings.toolPolicies.agent_create_note, "allow");
+		assert.equal(settings.toolPolicies.agent_edit_note, "allow");
+		assert.equal(settings.toolPolicies.agent_view_notes, "allow");
+		assert.deepEqual(settings.childRunnerTools, ["read", "grep", "find", "ls", "agent_write_proposal", "agent_edit_proposal", "agent_view_artifacts", "agent_create_note", "agent_edit_note", "agent_view_notes"]);
 	});
 
 	test("agent jobs are sanitized and isolated under .agents", async () => {
@@ -128,7 +131,7 @@ describe("blank-slate MVP foundations", () => {
 			assert.equal(job.readableRoot, path.resolve(cwd));
 			assert.equal(job.writableRoot, path.join(cwd, ".agents", "module-x-worker"));
 			assert.equal(job.status, "draft");
-			assert.deepEqual(job.allowedTools, ["read", "grep", "find", "ls", "agent_write_proposal", "agent_edit_proposal", "agent_view_artifacts"]);
+			assert.deepEqual(job.allowedTools, ["read", "grep", "find", "ls", "agent_write_proposal", "agent_edit_proposal", "agent_view_artifacts", "agent_create_note", "agent_edit_note", "agent_view_notes"]);
 		} finally {
 			await fsp.rm(cwd, { recursive: true, force: true });
 		}
@@ -423,12 +426,16 @@ describe("blank-slate MVP foundations", () => {
 		assert.ok(handlers.has("tool_call"));
 		assert.equal(tools.has("agent_write_proposal"), false);
 		assert.equal(tools.has("agent_edit_proposal"), false);
+		assert.equal(tools.has("agent_view_artifacts"), false);
+		assert.equal(tools.has("agent_create_note"), false);
+		assert.equal(tools.has("agent_edit_note"), false);
+		assert.equal(tools.has("agent_view_notes"), false);
 
 		const result = await handlers.get("tool_call")({ toolName: "write", input: { path: "main.txt" } }, { cwd: projectRoot });
 		assert.equal(result, undefined);
 	});
 
-	test("extension registers proposal tools only in marked agent subprocess contexts", async () => {
+	test("extension registers agent-only tools only in marked agent subprocess contexts", async () => {
 		const extension = (await importCompiled("index.js")).default;
 		const tools = new Map();
 		const cwd = await fsp.mkdtemp(path.join(os.tmpdir(), "extension-tools-"));
@@ -445,6 +452,9 @@ describe("blank-slate MVP foundations", () => {
 			assert.ok(tools.has("agent_write_proposal"));
 			assert.ok(tools.has("agent_edit_proposal"));
 			assert.ok(tools.has("agent_view_artifacts"));
+			assert.ok(tools.has("agent_create_note"));
+			assert.ok(tools.has("agent_edit_note"));
+			assert.ok(tools.has("agent_view_notes"));
 
 			await fsp.mkdir(path.join(cwd, "src"), { recursive: true });
 			await fsp.writeFile(path.join(cwd, "src", "file.ts"), "const value = 1;\n");
@@ -461,6 +471,19 @@ describe("blank-slate MVP foundations", () => {
 			const diffResult = await tools.get("agent_view_artifacts").execute("tool-4", { path: "src/file.ts" }, undefined, undefined, { cwd });
 			assert.match(diffResult.content[0].text, /- const value = 1;/);
 			assert.match(diffResult.content[0].text, /\+ const value = 3;/);
+
+			await tools.get("agent_create_note").execute("tool-5", { name: "handoff", content: "Initial findings\nTODO: review api\n" }, undefined, undefined, { cwd });
+			assert.equal(await fsp.readFile(path.join(cwd, ".agents", "notes", "handoff.md"), "utf8"), "Initial findings\nTODO: review api\n");
+			const notesList = await tools.get("agent_view_notes").execute("tool-6", {}, undefined, undefined, { cwd });
+			assert.match(notesList.content[0].text, /handoff\.md/);
+			const noteRead = await tools.get("agent_view_notes").execute("tool-7", { note: "handoff" }, undefined, undefined, { cwd });
+			assert.match(noteRead.content[0].text, /Initial findings/);
+			await tools.get("agent_edit_note").execute("tool-8", { note: "handoff", edits: [{ oldText: "TODO: review api", newText: "DONE: reviewed api" }] }, undefined, undefined, { cwd });
+			assert.equal(await fsp.readFile(path.join(cwd, ".agents", "notes", "handoff.md"), "utf8"), "Initial findings\nDONE: reviewed api\n");
+			await assert.rejects(
+				() => tools.get("agent_create_note").execute("tool-9", { name: "../escape", content: "no" }, undefined, undefined, { cwd }),
+				/plain names/,
+			);
 		} finally {
 			delete process.env.DESGRACA_AGENT_JOB_ID;
 			delete process.env.DESGRACA_AGENT_NAME;
@@ -469,7 +492,7 @@ describe("blank-slate MVP foundations", () => {
 		}
 	});
 
-	test("agent proposal and artifact-view tools are allowed by default without child UI", async () => {
+	test("agent-only proposal, artifact, and note tools are allowed by default without child UI", async () => {
 		const extension = (await importCompiled("index.js")).default;
 		const handlers = new Map();
 		extension({
@@ -486,6 +509,8 @@ describe("blank-slate MVP foundations", () => {
 			assert.equal(result, undefined);
 			const viewResult = await handlers.get("tool_call")({ toolName: "agent_view_artifacts", input: {} }, { cwd, hasUI: false });
 			assert.equal(viewResult, undefined);
+			const noteResult = await handlers.get("tool_call")({ toolName: "agent_create_note", input: { name: "handoff" } }, { cwd, hasUI: false });
+			assert.equal(noteResult, undefined);
 		} finally {
 			delete process.env.DESGRACA_AGENT_JOB_ID;
 			delete process.env.DESGRACA_AGENT_NAME;
