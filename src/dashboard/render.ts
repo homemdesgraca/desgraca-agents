@@ -213,6 +213,7 @@ export function renderJobDetails(job: AgentJob | undefined, width: number, theme
 		...renderField("Readable root", job.readableRoot, width, theme),
 		...renderField("Writable root", job.writableRoot, width, theme),
 		...renderField("Allowed tools", job.allowedTools.join(", ") || "(none)", width, theme),
+		...renderField("Model", job.model ? `${job.model.provider}/${job.model.id}` : "current pi default", width, theme),
 		...renderField("Task", job.task || "(empty)", width, theme),
 		...renderFinalResponse(job, width, theme),
 		clampLine(`${fg(theme, "dim", "Process:")} ${fg(theme, "text", job.process?.pid ? `pid ${job.process.pid}` : "not running")}${job.process?.readOnly ? fg(theme, "warning", " | read-only runner") : ""}`, width),
@@ -315,6 +316,8 @@ export function renderFooterHints(width: number, theme?: Theme): string[] {
 		`${key(theme, "S")} start`,
 		`${key(theme, "X")} abort`,
 		`${key(theme, "A/N")} approve/deny`,
+		`${key(theme, "Del")} delete`,
+		`${key(theme, "↑/↓")} scroll`,
 		`${key(theme, "L/P/D")} modes`,
 		`${key(theme, "R")} refresh`,
 		`${key(theme, "H")} help`,
@@ -324,19 +327,28 @@ export function renderFooterHints(width: number, theme?: Theme): string[] {
 }
 
 export function renderHelp(width: number, theme?: Theme): string[] {
+	const heading = (text: string) => fg(theme, "toolTitle", bold(theme, text));
 	const lines = [
-		`${key(theme, "C")} create a task-scoped agent job. Opens an empty overlay for the worker name and task; cancelling returns to this dashboard without creating anything.`,
+		heading("Navigation"),
 		`${key(theme, "1-9")} select an agent job from the left pane. The selected job drives every detail view and action.`,
+		`${key(theme, "↑/↓")} scroll the right-hand panel when its content is longer than the visible dashboard area.`,
+		`${key(theme, "Enter")} returns to agents mode. ${key(theme, "Q/Esc")} closes the dashboard.`,
+		"",
+		heading("Job actions"),
+		`${key(theme, "C")} create a task-scoped agent job. Opens an empty overlay for the worker name, model, and task; cancelling returns to this dashboard without creating anything.`,
 		`${key(theme, "S")} start the selected job in its isolated workspace. ${key(theme, "X")} aborts the selected job if it is running.`,
-		`${key(theme, "Agents mode")} shows the selected agent's identity, status, readable root, writable root, allowed tools, task, final response preview, process state, and recent logs.`,
-		`${key(theme, "Logs mode")} shows a larger slice of recent worker events, subprocess output summaries, status changes, and refresh messages.`,
+		`${key(theme, "Del/Backspace")} deletes the selected agent job after confirmation and removes its .agents workspace.`,
+		`${key(theme, "A")} approves the first pending approval for the selected agent. ${key(theme, "N")} denies it.`,
+		`${key(theme, "R")} refreshes artifact discovery for the selected agent.`,
+		"",
+		heading("Dashboard modes"),
+		`${key(theme, "Agents mode")} shows the selected agent's identity, status, readable root, writable root, allowed tools, model, task, final response preview, process state, and recent logs.`,
+		`${key(theme, "Logs mode")} shows wrapped worker events, subprocess output summaries, status changes, final responses, and refresh messages.`,
 		`${key(theme, "Approvals mode")} shows pending sensitive tool requests for the selected agent, including tool name, input summary, policy reason, and simple risk warnings.`,
 		`${key(theme, "Artifacts mode")} lists files discovered under the selected agent's .agents workspace. Press ${key(theme, "1-9")} in this mode to preview an artifact without applying it to the project.`,
-		`${key(theme, "Help mode")} is this reference view. Press ${key(theme, "Enter")} to return to agents mode.`,
-		`${key(theme, "A")} approves the first pending approval for the selected agent. ${key(theme, "N")} denies it.`,
-		`${key(theme, "R")} refreshes artifact discovery for the selected agent. ${key(theme, "Q/Esc")} closes the dashboard.`,
+		`${key(theme, "Help mode")} is this reference view with grouped navigation, job actions, and mode descriptions.`,
 	];
-	return lines.flatMap((line) => wrapWords(line, width)).map((line) => clampLine(line, width));
+	return lines.flatMap((line) => (line === "" ? [""] : wrapWords(line, width))).map((line) => clampLine(line, width));
 }
 
 export function renderSectionTitle(title: string, width: number, theme?: Theme): string {

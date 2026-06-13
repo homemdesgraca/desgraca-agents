@@ -13,9 +13,12 @@ export type DashboardAction =
 	| { type: "artifacts" }
 	| { type: "help" }
 	| { type: "normal" }
-	| { type: "refresh" };
+	| { type: "refresh" }
+	| { type: "delete" }
+	| { type: "scrollUp" }
+	| { type: "scrollDown" };
 
-export const DASHBOARD_HELP_TEXT = "H opens full help. Enter returns to agents mode.";
+export const DASHBOARD_HELP_TEXT = "H opens full help. ↑/↓ scroll right panel. Enter returns to agents mode.";
 
 export function parseDashboardAction(input: string): DashboardAction | undefined {
 	if (matchesKey(input, "escape") || input === "q" || input === "Q") return { type: "close" };
@@ -30,6 +33,9 @@ export function parseDashboardAction(input: string): DashboardAction | undefined
 	if (input === "d" || input === "D") return { type: "artifacts" };
 	if (input === "h" || input === "H" || input === "?") return { type: "help" };
 	if (matchesKey(input, "enter")) return { type: "normal" };
+	if (matchesKey(input, "delete") || matchesKey(input, "backspace")) return { type: "delete" };
+	if (matchesKey(input, "up")) return { type: "scrollUp" };
+	if (matchesKey(input, "down")) return { type: "scrollDown" };
 	if (input === "r" || input === "R") return { type: "refresh" };
 	return undefined;
 }

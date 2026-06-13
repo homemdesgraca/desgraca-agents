@@ -3,15 +3,30 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { getSettingsListTheme } from "@earendil-works/pi-coding-agent";
 import { Container, type SettingItem, SettingsList, Text } from "@earendil-works/pi-tui";
 import { getAgentProcessEnvContext } from "./src/agents/agent-env.ts";
+import type { AgentModelSelection } from "./src/agents/agent-job.ts";
 import { AgentStore } from "./src/agents/agent-store.ts";
 import { PiSubprocessAgentRunner } from "./src/agents/agent-runner.ts";
 import { CreateJobDialog, type CreateJobDialogResult } from "./src/dashboard/create-job-dialog.ts";
 import { Dashboard } from "./src/dashboard/Dashboard.ts";
+import { DeleteAgentDialog } from "./src/dashboard/delete-agent-dialog.ts";
 import { decideToolPolicy } from "./src/permissions/policies.ts";
 import { checkAgentReadScope, checkAgentWriteScope } from "./src/permissions/scope-guard.ts";
 import { createDefaultSettings, cycleToolPolicy, knownPolicyTools, setToolPolicy, type AgentExtensionSettings, type ToolPolicy } from "./src/settings/settings.ts";
 
 const SETTINGS_ENTRY = "desgraca-agents-settings";
+
+function getCreatableAgentModels(ctx: ExtensionContext): AgentModelSelection[] {
+	const models = ctx.modelRegistry.getAvailable().map((model) => ({ provider: model.provider, id: model.id, label: `${model.provider}/${model.id}` }));
+	if (ctx.model && !models.some((model) => model.provider === ctx.model?.provider && model.id === ctx.model?.id)) {
+		models.unshift({ provider: ctx.model.provider, id: ctx.model.id, label: `${ctx.model.provider}/${ctx.model.id}` });
+	}
+	const currentIndex = ctx.model ? models.findIndex((model) => model.provider === ctx.model?.provider && model.id === ctx.model?.id) : -1;
+	if (currentIndex > 0) {
+		const [current] = models.splice(currentIndex, 1);
+		if (current) models.unshift(current);
+	}
+	return models;
+}
 
 function getToolPathInput(toolName: string, input: unknown): string | undefined {
 	if (!input || typeof input !== "object") return toolName === "grep" || toolName === "find" ? "." : undefined;
@@ -139,6 +154,7 @@ export default function desgracaAgentsExtension(pi: ExtensionAPI) {
 				return;
 			}
 
+			await store.loadFromDisk(ctx.cwd);
 			let dashboard: Dashboard | undefined;
 			await ctx.ui.custom((_tui, theme, _keybindings, done) => {
 				dashboard = new Dashboard(
@@ -147,9 +163,32 @@ export default function desgracaAgentsExtension(pi: ExtensionAPI) {
 					{
 						close: () => done(undefined),
 						notify: (message, level = "info") => ctx.ui.notify(message, level),
+						deleteJob: async (job) => {
+							const ok = await ctx.ui.custom<boolean>(
+								(_dialogTui, dialogTheme, _dialogKeybindings, dialogDone) => new DeleteAgentDialog(job, dialogTheme, dialogDone),
+								{
+									overlay: true,
+									overlayOptions: {
+										anchor: "center",
+										width: "85%",
+										minWidth: 50,
+										maxHeight: "60%",
+										margin: 2,
+									},
+								},
+							);
+							if (!ok) {
+								_tui.requestRender();
+								return false;
+							}
+							const deleted = await store.delete(job.id);
+							_tui.requestRender();
+							return deleted;
+						},
 						createJob: async () => {
+							const modelOptions = getCreatableAgentModels(ctx);
 							const result = await ctx.ui.custom<CreateJobDialogResult | undefined>(
-								(dialogTui, dialogTheme, _dialogKeybindings, dialogDone) => new CreateJobDialog(dialogTui, dialogTheme, dialogDone),
+								(dialogTui, dialogTheme, _dialogKeybindings, dialogDone) => new CreateJobDialog(dialogTui, dialogTheme, dialogDone, modelOptions),
 								{
 									overlay: true,
 									overlayOptions: {
@@ -165,7 +204,7 @@ export default function desgracaAgentsExtension(pi: ExtensionAPI) {
 								_tui.requestRender();
 								return;
 							}
-							const job = store.create(ctx.cwd, result.name, result.task);
+							const job = store.create(ctx.cwd, result.name, result.task, result.model);
 							await fs.mkdir(job.writableRoot, { recursive: true });
 							store.appendLog(job.id, `Workspace ready: ${job.writableRoot}`);
 						},

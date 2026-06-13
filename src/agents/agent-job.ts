@@ -32,6 +32,12 @@ export interface AgentArtifact {
 	updatedAt: number;
 }
 
+export interface AgentModelSelection {
+	provider: string;
+	id: string;
+	label?: string;
+}
+
 export interface AgentProcessMetadata {
 	pid?: number;
 	command?: string;
@@ -48,6 +54,7 @@ export interface AgentJob {
 	name: string;
 	task: string;
 	finalResponse?: string;
+	model?: AgentModelSelection;
 	status: AgentJobStatus;
 	allowedTools: string[];
 	readableRoot: string;
@@ -84,13 +91,14 @@ export function getAgentWritableRoot(cwd: string, agentName: string): string {
 	return path.join(getAgentsRoot(cwd), sanitizeAgentName(agentName));
 }
 
-export function createAgentJob(cwd: string, name: string, task: string): AgentJob {
+export function createAgentJob(cwd: string, name: string, task: string, model?: AgentModelSelection): AgentJob {
 	const now = Date.now();
 	const safeName = sanitizeAgentName(name);
 	return {
 		id: createId(),
 		name: safeName,
 		task: task.trim(),
+		model,
 		status: "draft",
 		allowedTools: ["read", "grep", "find", "ls"],
 		readableRoot: path.resolve(cwd),

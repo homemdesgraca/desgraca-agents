@@ -12,14 +12,16 @@
 
 The `/agents` screen uses a tall bordered, theme-aware dashboard with an agent list pane, agent description pane, mode tabs, and wrapped footer hints. Press `H` for descriptive help that explains what each dashboard mode shows.
 
-- `C` create a new job with empty name/task fields; `Esc` or `Ctrl+C` cancels and returns to the dashboard.
+- `C` create a new job with empty name/task fields and a selectable worker model; `Esc` or `Ctrl+C` cancels and returns to the dashboard.
 - `1`-`9` select an agent job.
+- `Up` / `Down` scroll the right-hand panel when there is more content than visible space.
 - `S` start the selected job.
 - `X` abort the selected job.
+- `Delete` or `Backspace` delete the selected job and its `.agents/{AGENT_NAME}` workspace after confirmation.
 - `A` approve the first pending approval.
 - `N` deny the first pending approval.
 - `Enter` return to the main `AGENTS` screen.
-- `L` show wrapped logs.
+- `L` show wrapped logs, including the full child subprocess launch command and final response output.
 - `P` show approvals.
 - `D` show artifacts; in artifact mode, `1`-`9` previews an artifact.
 - `R` refresh artifacts.
@@ -28,13 +30,13 @@ The `/agents` screen uses a tall bordered, theme-aware dashboard with an agent l
 
 ## Workspace rule
 
-Each job may read from the current pi working directory. Job-owned writable output belongs under:
+Each job may read from the current pi working directory. Job-owned writable output and persisted dashboard state belong under:
 
 ```text
 .agents/{AGENT_NAME}
 ```
 
-The MVP runner starts child pi processes in read-only mode (`read`, `grep`, `find`, and `ls`) until full child tool-call approval is implemented. Generated work is not applied automatically to the main project.
+Each workspace includes `agent-job.json`, which persists the job metadata, logs, approvals, artifacts, selected model, and final response so jobs survive reopening `/agents` or starting a new pi session. The MVP runner starts child pi processes in read-only mode (`read`, `grep`, `find`, and `ls`) until full child tool-call approval is implemented. Generated work is not applied automatically to the main project.
 
 ## Permission defaults
 

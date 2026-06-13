@@ -29,11 +29,13 @@ export interface DashboardActions {
 	createJob(): Promise<void>;
 	close(): void;
 	notify(message: string, level?: "info" | "warning" | "error"): void;
+	deleteJob(job: AgentJob): Promise<boolean>;
 }
 
 export class Dashboard implements Component {
 	private mode: DashboardMode = "normal";
 	private artifactPreviewIndex: number | undefined;
+	private rightScrollOffset = 0;
 	private notice: { message: string; level: "info" | "warning" | "error" } | undefined;
 	private noticeTimer: ReturnType<typeof setTimeout> | undefined;
 	private cachedWidth: number | undefined;
@@ -78,6 +80,7 @@ export class Dashboard implements Component {
 		if (action.type === "select") {
 			if (this.mode === "artifacts") this.artifactPreviewIndex = action.index;
 			else this.store.selectByIndex(action.index);
+			this.rightScrollOffset = 0;
 			this.invalidateAndRender();
 			return;
 		}
@@ -88,6 +91,12 @@ export class Dashboard implements Component {
 	private async handleAction(type: Exclude<ReturnType<typeof parseDashboardAction>, undefined>["type"]): Promise<void> {
 		const job = this.store.getSelected();
 		switch (type) {
+			case "scrollUp":
+				this.rightScrollOffset = Math.max(0, this.rightScrollOffset - 1);
+				break;
+			case "scrollDown":
+				this.rightScrollOffset += 1;
+				break;
 			case "create":
 				await this.actions.createJob();
 				break;
@@ -98,6 +107,14 @@ export class Dashboard implements Component {
 			case "abort":
 				if (job) this.runner.abort(job.id);
 				break;
+			case "delete":
+				if (!job) this.showNotice("No selected job.", "warning");
+				else if (await this.actions.deleteJob(job)) {
+					if (this.runner.isRunning(job.id)) this.runner.abort(job.id);
+					this.rightScrollOffset = 0;
+					this.showNotice(`Deleted agent ${job.name}.`, "info");
+				}
+				break;
 			case "approve":
 				this.resolveFirstApproval(job, "approved");
 				break;
@@ -106,20 +123,25 @@ export class Dashboard implements Component {
 				break;
 			case "logs":
 				this.mode = "logs";
+				this.rightScrollOffset = 0;
 				break;
 			case "approvals":
 				this.mode = "approvals";
+				this.rightScrollOffset = 0;
 				break;
 			case "artifacts":
 				this.mode = "artifacts";
 				this.artifactPreviewIndex = undefined;
+				this.rightScrollOffset = 0;
 				break;
 			case "help":
 				this.mode = "help";
+				this.rightScrollOffset = 0;
 				break;
 			case "normal":
 				this.mode = "normal";
 				this.artifactPreviewIndex = undefined;
+				this.rightScrollOffset = 0;
 				break;
 			case "refresh":
 				await this.refreshArtifacts(job);
@@ -184,21 +206,31 @@ export class Dashboard implements Component {
 		lines.push(renderDivider(safeWidth, theme));
 
 		const left = [renderSectionTitle("Agents", leftWidth, theme), ...renderJobList(jobs, selectedId, leftWidth, theme)];
+		let rightTitleText: string;
 		let right: string[];
-		if (this.mode === "logs") right = [renderSectionTitle("Logs", rightWidth, theme), ...renderLogs(selected, rightWidth, 18, theme, { wrap: true })];
-		else if (this.mode === "approvals") right = [renderSectionTitle("Approvals", rightWidth, theme), ...renderApprovals(selected, rightWidth, theme)];
+		if (this.mode === "logs") {
+			rightTitleText = "Logs";
+			right = [renderSectionTitle(rightTitleText, rightWidth, theme), ...renderLogs(selected, rightWidth, 18, theme, { wrap: true })];
+		} else if (this.mode === "approvals") {
+			rightTitleText = "Approvals";
+			right = [renderSectionTitle(rightTitleText, rightWidth, theme), ...renderApprovals(selected, rightWidth, theme)];
+		}
 		else if (this.mode === "artifacts") {
+			rightTitleText = "Artifacts";
 			const artifact = selected?.artifacts[this.artifactPreviewIndex ?? -1];
 			right = [
-				renderSectionTitle("Artifacts", rightWidth, theme),
+				renderSectionTitle(rightTitleText, rightWidth, theme),
 				...renderArtifacts(selected, rightWidth, theme),
 				...(artifact ? ["", renderSectionTitle("Preview", rightWidth, theme)] : []),
 				...renderArtifactContent(artifact, rightWidth, 18, theme),
 			];
-		} else if (this.mode === "help") right = [renderSectionTitle("Help", rightWidth, theme), ...renderHelp(rightWidth, theme)];
-		else {
+		} else if (this.mode === "help") {
+			rightTitleText = "Help";
+			right = [renderSectionTitle(rightTitleText, rightWidth, theme), ...renderHelp(rightWidth, theme)];
+		} else {
+			rightTitleText = "Agent description";
 			right = [
-				renderSectionTitle("Agent description", rightWidth, theme),
+				renderSectionTitle(rightTitleText, rightWidth, theme),
 				...renderJobDetails(selected, rightWidth, theme),
 				"",
 				renderSectionTitle("Recent logs", rightWidth, theme),
@@ -206,9 +238,16 @@ export class Dashboard implements Component {
 			];
 		}
 		const minPaneRows = 22;
+		const scrollableRows = Math.max(1, minPaneRows - 1);
+		const rightTitle = right[0] ?? renderSectionTitle(rightTitleText, rightWidth, theme);
+		const rightBody = right.slice(1);
+		const maxScroll = Math.max(0, rightBody.length - scrollableRows);
+		this.rightScrollOffset = Math.min(this.rightScrollOffset, maxScroll);
+		const scrollInfo = maxScroll > 0 ? ` ${this.rightScrollOffset + 1}-${Math.min(rightBody.length, this.rightScrollOffset + scrollableRows)}/${rightBody.length}` : "";
+		const visibleRight = [maxScroll > 0 ? renderSectionTitle(`${rightTitleText}${scrollInfo}`, rightWidth, theme) : rightTitle, ...rightBody.slice(this.rightScrollOffset, this.rightScrollOffset + scrollableRows)];
 		while (left.length < minPaneRows) left.push("");
-		while (right.length < minPaneRows) right.push("");
-		for (const line of splitColumns(left, right, innerWidth, theme)) lines.push(renderBoxedLine(line, safeWidth, theme));
+		while (visibleRight.length < minPaneRows) visibleRight.push("");
+		for (const line of splitColumns(left, visibleRight, innerWidth, theme)) lines.push(renderBoxedLine(line, safeWidth, theme));
 		lines.push(renderDivider(safeWidth, theme));
 		for (const line of renderFooterHints(innerWidth, theme)) lines.push(renderBoxedLine(line, safeWidth, theme));
 		lines.push(renderBoxedLine(clampLine(DASHBOARD_HELP_TEXT, innerWidth), safeWidth, theme));

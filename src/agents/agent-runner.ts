@@ -43,6 +43,7 @@ async function walkFiles(root: string, cwd: string, agentId: string): Promise<Ag
 			return;
 		}
 		for (const entry of entries) {
+			if (entry.name === "agent-job.json" || entry.name === "agent-job.json.tmp") continue;
 			const absolutePath = path.join(current, entry.name);
 			if (entry.isDirectory()) {
 				await walk(absolutePath);
@@ -102,10 +103,12 @@ export class PiSubprocessAgentRunner implements AgentRunner {
 			job.task,
 		].join("\n");
 
-		const args = ["--mode", "json", "-p", "--no-session", "--tools", safeTools, prompt];
+		const modelArgs = job.model ? ["--model", `${job.model.provider}/${job.model.id}`] : [];
+		const args = ["--mode", "json", "-p", "--no-session", ...modelArgs, "--tools", safeTools, prompt];
 		const invocation = getPiInvocation(args);
+		const loggedArgs = invocation.args.map((arg) => (arg === prompt ? "<task prompt>" : arg));
 		this.store.setStatus(jobId, "running");
-		this.store.appendLog(jobId, `Starting read-only subprocess: ${invocation.command} ${invocation.args.slice(0, 6).join(" ")} ...`);
+		this.store.appendLog(jobId, `Starting read-only subprocess: ${invocation.command} ${loggedArgs.join(" ")}`);
 		this.store.update(jobId, {
 			process: {
 				command: invocation.command,
