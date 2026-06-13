@@ -20,6 +20,8 @@ export interface ArtifactViewerOptions {
 	theme?: Theme;
 	viewportRows?: number;
 	onClose(): void;
+	onAccept?(job: AgentJob, artifact: AgentArtifact): Promise<string>;
+	requestRender?(): void;
 }
 
 function fg(theme: Theme | undefined, color: Parameters<Theme["fg"]>[0], text: string): string {
@@ -111,21 +113,27 @@ export class ArtifactViewer implements Component {
 	private scrollOffset = 0;
 	private wrap = false;
 	private notice: string | undefined;
-	private readonly proposalRead: ReturnType<typeof readTextFile>;
-	private readonly originalRead: ReturnType<typeof readTextFile> | undefined;
+	private awaitingAcceptConfirm = false;
+	private accepting = false;
+	private proposalRead: ReturnType<typeof readTextFile>;
+	private originalRead: ReturnType<typeof readTextFile> | undefined;
 	private cachedWidth: number | undefined;
 	private cachedLines: string[] | undefined;
 
 	constructor(private readonly options: ArtifactViewerOptions) {
 		this.mode = options.artifact.kind === "proposal" && options.artifact.originalPath ? "diff" : "proposal";
 		this.proposalRead = readTextFile(options.artifact.absolutePath);
-		const originalPath = resolveOriginalPath(options.job, options.artifact);
-		this.originalRead = originalPath ? readTextFile(originalPath) : undefined;
+		this.refreshOriginalRead();
 	}
 
 	invalidate(): void {
 		this.cachedWidth = undefined;
 		this.cachedLines = undefined;
+	}
+
+	private rerender(): void {
+		this.invalidate();
+		this.options.requestRender?.();
 	}
 
 	handleInput(data: string): void {
@@ -142,33 +150,80 @@ export class ArtifactViewer implements Component {
 		else if (data === "d" || data === "D") this.setMode("diff");
 		else if (data === "p" || data === "P") this.setMode("proposal");
 		else if (data === "o" || data === "O") this.setMode("original");
+		else if (data === "a" || data === "A") {
+			void this.acceptArtifact();
+		}
 		else if (data === "w" || data === "W") {
 			this.wrap = !this.wrap;
 			this.scrollOffset = 0;
+			this.awaitingAcceptConfirm = false;
 			this.notice = this.wrap ? "Wrapping enabled." : "Wrapping disabled.";
-			this.invalidate();
+			this.rerender();
 		}
 	}
 
 	private setMode(mode: ViewerMode): void {
 		if (mode === "diff" && !this.canShowProposalComparison()) {
-			this.notice = "Diff view requires a proposal artifact with a readable original file.";
-			this.invalidate();
+			this.notice = "Diff view requires a readable proposal artifact with an original path.";
+			this.rerender();
 			return;
 		}
 		if (mode === "original" && !this.originalRead) {
 			this.notice = "Original view requires a proposal artifact with an original path.";
-			this.invalidate();
+			this.rerender();
 			return;
 		}
 		this.mode = mode;
 		this.notice = undefined;
+		this.awaitingAcceptConfirm = false;
 		this.scrollOffset = 0;
-		this.invalidate();
+		this.rerender();
 	}
 
 	private canShowProposalComparison(): boolean {
-		return this.proposalRead.ok && this.originalRead?.ok === true;
+		return this.proposalRead.ok && !!this.originalRead;
+	}
+
+	private canAccept(): boolean {
+		return this.options.artifact.kind === "proposal" && !!this.options.artifact.originalPath && !!this.options.onAccept;
+	}
+
+	private refreshOriginalRead(): void {
+		const originalPath = resolveOriginalPath(this.options.job, this.options.artifact);
+		this.originalRead = originalPath ? readTextFile(originalPath) : undefined;
+	}
+
+	private async acceptArtifact(): Promise<void> {
+		if (!this.canAccept()) {
+			this.awaitingAcceptConfirm = false;
+			this.notice = "Accept is available only for proposal artifacts with an original path.";
+			this.rerender();
+			return;
+		}
+		if (this.accepting) return;
+		if (!this.awaitingAcceptConfirm) {
+			this.awaitingAcceptConfirm = true;
+			this.notice = `Press A again to accept this proposal into ${this.options.artifact.originalPath}.`;
+			this.rerender();
+			return;
+		}
+		this.accepting = true;
+		this.notice = "Accepting proposal...";
+		this.rerender();
+		try {
+			const message = await this.options.onAccept!(this.options.job, this.options.artifact);
+			this.proposalRead = readTextFile(this.options.artifact.absolutePath);
+			this.refreshOriginalRead();
+			this.mode = this.options.artifact.kind === "proposal" && this.options.artifact.originalPath ? "diff" : this.mode;
+			this.scrollOffset = 0;
+			this.notice = message;
+		} catch (error) {
+			this.notice = `Accept failed: ${error instanceof Error ? error.message : String(error)}`;
+		} finally {
+			this.awaitingAcceptConfirm = false;
+			this.accepting = false;
+			this.rerender();
+		}
 	}
 
 	private scrollBy(delta: number): void {
@@ -177,12 +232,12 @@ export class ArtifactViewer implements Component {
 
 	private setScroll(offset: number): void {
 		this.scrollOffset = Math.max(0, offset);
-		this.invalidate();
+		this.rerender();
 	}
 
 	private bodyRows(): number {
 		const viewport = this.options.viewportRows ?? 44;
-		return Math.max(8, Math.min(60, Math.floor(viewport) - 7));
+		return Math.max(8, Math.min(60, Math.floor(viewport) - 8));
 	}
 
 	render(width: number): string[] {
@@ -200,7 +255,8 @@ export class ArtifactViewer implements Component {
 		const lines = [
 			this.topBorder(safeWidth, title),
 			this.boxed(this.headerLine(innerWidth), safeWidth),
-			this.boxed(this.subHeaderLine(innerWidth), safeWidth),
+			this.boxed(this.artifactPathLine(innerWidth), safeWidth),
+			this.boxed(this.finalPathLine(innerWidth), safeWidth),
 			...(this.notice ? [this.boxed(fg(this.options.theme, "warning", this.notice), safeWidth)] : []),
 			this.divider(safeWidth),
 			...visible.map((line) => this.boxed(line, safeWidth)),
@@ -219,17 +275,22 @@ export class ArtifactViewer implements Component {
 		return padLine(`${fg(theme, "dim", "agent:")} ${fg(theme, "text", this.options.job.name)}  ${fg(theme, "dim", "mode:")} ${mode}  ${fg(theme, "dim", "wrap:")} ${this.wrap ? "on" : "off"}`, width);
 	}
 
-	private subHeaderLine(width: number): string {
+	private artifactPathLine(width: number): string {
 		const theme = this.options.theme;
-		const original = this.options.artifact.originalPath ? `  ${fg(theme, "dim", "original:")} ${fg(theme, "muted", this.options.artifact.originalPath)}` : "";
-		return padLine(`${fg(theme, "dim", "artifact:")} ${fg(theme, "text", this.options.artifact.path)}${original}`, width);
+		return padLine(`${fg(theme, "dim", "path:")} ${fg(theme, "text", this.options.artifact.path)}`, width);
+	}
+
+	private finalPathLine(width: number): string {
+		const theme = this.options.theme;
+		const finalPath = this.options.artifact.originalPath ?? "(review-only artifact; no accept target)";
+		return padLine(`${fg(theme, "dim", "final path:")} ${fg(theme, this.options.artifact.originalPath ? "muted" : "warning", finalPath)}`, width);
 	}
 
 	private footer(width: number): string {
 		const theme = this.options.theme;
 		const key = (value: string) => fg(theme, "accent", bold(theme, value));
 		const hints = this.options.artifact.kind === "proposal"
-			? `${key("Up/Down")} scroll  ${key("PgUp/PgDn")} page  ${key("D")} diff  ${key("P")} proposal  ${key("O")} original  ${key("W")} wrap  ${key("Q/Esc")} close`
+			? `${key("Up/Down")} scroll  ${key("PgUp/PgDn")} page  ${key("A")} accept  ${key("D")} diff  ${key("P")} proposal  ${key("O")} original  ${key("W")} wrap  ${key("Q/Esc")} close`
 			: `${key("Up/Down")} scroll  ${key("PgUp/PgDn")} page  ${key("P")} raw  ${key("W")} wrap  ${key("Q/Esc")} close`;
 		return padLine(hints, width);
 	}
@@ -246,10 +307,10 @@ export class ArtifactViewer implements Component {
 			return this.rawLines(this.originalRead.content);
 		}
 		if (this.mode === "diff") {
-			if (!this.proposalRead.ok || !this.originalRead?.ok) {
-				return [{ kind: "error", text: "Diff view requires a readable proposal artifact and original file." }];
+			if (!this.proposalRead.ok || !this.originalRead) {
+				return [{ kind: "error", text: "Diff view requires a readable proposal artifact and original path." }];
 			}
-			return buildLineDiff(this.originalRead.content, this.proposalRead.content);
+			return buildLineDiff(this.originalRead.ok ? this.originalRead.content : "", this.proposalRead.content);
 		}
 		if (!this.proposalRead.ok) return [{ kind: "error", text: `Could not read artifact: ${this.proposalRead.error}` }];
 		return this.rawLines(this.proposalRead.content);

@@ -289,8 +289,8 @@ export class Dashboard implements Component {
 					"",
 					renderSectionTitle("Selected artifact", rightWidth, theme),
 					clampLine(`Path: ${artifact.path}`, rightWidth),
+					clampLine(`Final path: ${artifact.originalPath ?? "(review-only artifact; no accept target)"}`, rightWidth),
 					clampLine(`Type: ${artifact.kind === "proposal" ? "proposal" : "artifact"}`, rightWidth),
-					...(artifact.originalPath ? [clampLine(`Original: ${artifact.originalPath}`, rightWidth)] : []),
 					clampLine(`Size: ${artifact.sizeBytes} bytes`, rightWidth),
 				] : []),
 			];

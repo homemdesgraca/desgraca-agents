@@ -298,10 +298,38 @@ describe("blank-slate MVP foundations", () => {
 			const rendered = viewer.render(100).join("\n");
 			assert.match(rendered, /Artifact viewer/);
 			assert.match(rendered, /DIFF/);
+			assert.match(rendered, /final path: src\/file\.txt/);
+			assert.match(rendered, /A.*accept/);
 			assert.match(rendered, /- two/);
 			assert.match(rendered, /\+ TWO/);
 			viewer.handleInput("q");
 			assert.equal(closed, true);
+		} finally {
+			await fsp.rm(cwd, { recursive: true, force: true });
+		}
+	});
+
+	test("accepting a proposal writes the proposal to the final project path", async () => {
+		const { createAgentJob } = await importCompiled("src/agents/agent-job.js");
+		const { acceptArtifactProposal } = await importCompiled("index.js");
+		const cwd = await fsp.mkdtemp(path.join(os.tmpdir(), "accept-artifact-"));
+		try {
+			const job = createAgentJob(cwd, "accept worker", "accept proposal");
+			const proposalPath = path.join(job.writableRoot, "proposals", "src", "accepted.txt");
+			await fsp.mkdir(path.dirname(proposalPath), { recursive: true });
+			await fsp.writeFile(proposalPath, "accepted content\n");
+			const message = await acceptArtifactProposal(job, {
+				id: "artifact-1",
+				agentId: job.id,
+				path: path.join(".agents", job.name, "proposals", "src", "accepted.txt"),
+				absolutePath: proposalPath,
+				sizeBytes: 17,
+				updatedAt: Date.now(),
+				kind: "proposal",
+				originalPath: path.join("src", "accepted.txt"),
+			});
+			assert.match(message, /Accepted proposal/);
+			assert.equal(await fsp.readFile(path.join(cwd, "src", "accepted.txt"), "utf8"), "accepted content\n");
 		} finally {
 			await fsp.rm(cwd, { recursive: true, force: true });
 		}

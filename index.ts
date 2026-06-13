@@ -1,9 +1,10 @@
 import * as fs from "node:fs/promises";
+import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { getSettingsListTheme } from "@earendil-works/pi-coding-agent";
+import { getSettingsListTheme, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { Container, type SettingItem, SettingsList, Text } from "@earendil-works/pi-tui";
 import { AGENT_SETTINGS_ENV, getAgentProcessEnvContext } from "./src/agents/agent-env.ts";
-import type { AgentModelSelection } from "./src/agents/agent-job.ts";
+import type { AgentArtifact, AgentJob, AgentModelSelection } from "./src/agents/agent-job.ts";
 import { AgentStore } from "./src/agents/agent-store.ts";
 import { PiSubprocessAgentRunner } from "./src/agents/agent-runner.ts";
 import { registerAgentProposalTools } from "./src/agents/proposal-tools.ts";
@@ -13,7 +14,7 @@ import { Dashboard } from "./src/dashboard/Dashboard.ts";
 import { DeleteAgentDialog } from "./src/dashboard/delete-agent-dialog.ts";
 import { TrackingMessageDialog } from "./src/dashboard/tracking-message-dialog.ts";
 import { decideToolPolicy } from "./src/permissions/policies.ts";
-import { checkAgentReadScope, checkAgentWriteScope } from "./src/permissions/scope-guard.ts";
+import { checkAgentReadScope, checkAgentWriteScope, isPathInside } from "./src/permissions/scope-guard.ts";
 import { createDefaultSettings, cycleToolPolicy, knownPolicyTools, setToolPolicy, type AgentExtensionSettings, type ToolPolicy } from "./src/settings/settings.ts";
 
 const SETTINGS_ENTRY = "desgraca-agents-settings";
@@ -27,6 +28,24 @@ function normalizeSettings(saved: Partial<AgentExtensionSettings> = {}): AgentEx
 		toolPolicies: { ...defaults.toolPolicies, ...(saved.toolPolicies ?? {}) },
 		childRunnerTools: Array.from(new Set([...(saved.childRunnerTools ?? defaults.childRunnerTools), ...PROPOSAL_TOOL_NAMES])),
 	};
+}
+
+export async function acceptArtifactProposal(job: AgentJob, artifact: AgentArtifact): Promise<string> {
+	if (artifact.kind !== "proposal" || !artifact.originalPath) {
+		throw new Error("Only proposal artifacts with an original path can be accepted.");
+	}
+	const targetPath = path.resolve(job.readableRoot, artifact.originalPath);
+	const projectRoot = path.resolve(job.readableRoot);
+	const agentsRoot = path.resolve(projectRoot, ".agents");
+	if (!isPathInside(projectRoot, targetPath) || isPathInside(agentsRoot, targetPath)) {
+		throw new Error(`Refusing to accept proposal outside the main project tree: ${targetPath}`);
+	}
+	const content = await fs.readFile(artifact.absolutePath, "utf8");
+	await withFileMutationQueue(targetPath, async () => {
+		await fs.mkdir(path.dirname(targetPath), { recursive: true });
+		await fs.writeFile(targetPath, content, "utf8");
+	});
+	return `Accepted proposal into ${artifact.originalPath}.`;
 }
 
 function getCreatableAgentModels(ctx: ExtensionContext): AgentModelSelection[] {
@@ -190,6 +209,13 @@ export default function desgracaAgentsExtension(pi: ExtensionAPI) {
 									theme: viewerTheme,
 									viewportRows: Math.floor((((viewerTui as unknown as { terminal?: { rows?: number } }).terminal?.rows ?? 50) * 0.95)),
 									onClose: viewerDone,
+									requestRender: () => viewerTui.requestRender(),
+									onAccept: async (acceptedJob, acceptedArtifact) => {
+										const message = await acceptArtifactProposal(acceptedJob, acceptedArtifact);
+										store.appendLog(acceptedJob.id, `${message} Source artifact: ${acceptedArtifact.path}`);
+										store.appendTracking(acceptedJob.id, { kind: "status", title: "Artifact accepted", message: `${message}\nSource artifact: ${acceptedArtifact.path}` });
+										return message;
+									},
 								}),
 								{
 									overlay: true,
