@@ -43,7 +43,7 @@ export interface AgentArtifact {
 	absolutePath: string;
 	sizeBytes: number;
 	updatedAt: number;
-	kind?: "artifact" | "proposal";
+	kind?: "artifact" | "proposal" | "note";
 	originalPath?: string;
 }
 

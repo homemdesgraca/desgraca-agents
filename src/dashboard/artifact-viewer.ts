@@ -111,7 +111,7 @@ export function buildLineDiff(originalContent: string, proposalContent: string):
 export class ArtifactViewer implements Component {
 	private mode: ViewerMode;
 	private scrollOffset = 0;
-	private wrap = false;
+	private wrap = true;
 	private notice: string | undefined;
 	private awaitingAcceptConfirm = false;
 	private accepting = false;

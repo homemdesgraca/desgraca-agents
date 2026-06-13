@@ -210,13 +210,20 @@ describe("blank-slate MVP foundations", () => {
 		try {
 			const job = createAgentJob(cwd, "artifact worker", "produce notes");
 			await fsp.mkdir(path.join(job.writableRoot, "proposals", "nested"), { recursive: true });
+			await fsp.mkdir(path.join(job.writableRoot, "notes"), { recursive: true });
 			await fsp.writeFile(path.join(job.writableRoot, "proposals", "nested", "notes.md"), "hello");
+			await fsp.writeFile(path.join(job.writableRoot, "notes", "handoff.md"), "note");
 			await fsp.writeFile(path.join(cwd, "main-project.txt"), "must not be listed");
 			const artifacts = await discoverArtifacts(job);
-			assert.deepEqual(artifacts.map((artifact) => artifact.path), [path.join(".agents", "artifact-worker", "proposals", "nested", "notes.md")]);
-			assert.equal(artifacts[0].sizeBytes, 5);
-			assert.equal(artifacts[0].kind, "proposal");
-			assert.equal(artifacts[0].originalPath, path.join("nested", "notes.md"));
+			assert.deepEqual(artifacts.map((artifact) => artifact.path), [
+				path.join(".agents", "artifact-worker", "notes", "handoff.md"),
+				path.join(".agents", "artifact-worker", "proposals", "nested", "notes.md"),
+			]);
+			assert.equal(artifacts[0].sizeBytes, 4);
+			assert.equal(artifacts[0].kind, "note");
+			assert.equal(artifacts[1].sizeBytes, 5);
+			assert.equal(artifacts[1].kind, "proposal");
+			assert.equal(artifacts[1].originalPath, path.join("nested", "notes.md"));
 		} finally {
 			await fsp.rm(cwd, { recursive: true, force: true });
 		}
@@ -230,8 +237,10 @@ describe("blank-slate MVP foundations", () => {
 		try {
 			const job = createAgentJob(cwd, "render worker", "show ui");
 			const artifactPath = path.join(job.writableRoot, "notes.md");
-			await fsp.mkdir(job.writableRoot, { recursive: true });
+			const notePath = path.join(job.writableRoot, "notes", "handoff.md");
+			await fsp.mkdir(path.dirname(notePath), { recursive: true });
 			await fsp.writeFile(artifactPath, "line one\nline two");
+			await fsp.writeFile(notePath, "handoff note");
 			job.pendingApprovals.push({
 				id: "approval-1",
 				agentId: job.id,
@@ -253,12 +262,23 @@ describe("blank-slate MVP foundations", () => {
 				kind: "proposal",
 				originalPath: "notes.md",
 			});
+			job.artifacts.push({
+				id: "artifact-2",
+				agentId: job.id,
+				path: path.join(".agents", job.name, "notes", "handoff.md"),
+				absolutePath: notePath,
+				sizeBytes: 12,
+				updatedAt: Date.now(),
+				kind: "note",
+			});
 			assert.match(renderJobList([job], job.id, 100).join("\n"), /approvals:1/);
 			assert.match(renderApprovals(job, 100).join("\n"), /Warning: rm detected/);
 			assert.match(renderArtifacts(job, 100).join("\n"), /original: notes\.md/);
+			assert.match(renderArtifacts(job, 100).join("\n"), /notes.*handoff\.md/);
+			assert.doesNotMatch(renderArtifacts(job, 100, undefined, 0, { showNotes: false }).join("\n"), /handoff\.md/);
 			assert.match(renderArtifactContent(job.artifacts[0], 100).join("\n"), /line two/);
 			assert.match(renderHelp(120).join("\n"), /C create/);
-			assert.match(renderHelp(120).join("\n"), /still selects agents/);
+			assert.match(renderHelp(120).join("\n"), /1-9 still/);
 			assert.deepEqual(parseDashboardAction("F"), { type: "artifacts" });
 			assert.equal(parseDashboardAction("D"), undefined);
 			assert.equal(parseDashboardAction("L"), undefined);
@@ -272,7 +292,9 @@ describe("blank-slate MVP foundations", () => {
 			assert.deepEqual(parseDashboardAction("]"), { type: "artifactNext" });
 			assert.deepEqual(parseDashboardAction("O"), { type: "artifactOpen" });
 			assert.deepEqual(parseDashboardAction("\r"), { type: "artifactOpen" });
+			assert.deepEqual(parseDashboardAction("V"), { type: "toggleNotes" });
 			assert.doesNotMatch(renderFooterHints(120, undefined, "artifacts").join("\n"), /approve|deny/);
+			assert.match(renderFooterHints(120, undefined, "artifacts").join("\n"), /V.*notes/);
 			assert.doesNotMatch(renderFooterHints(120, undefined, "normal").join("\n"), /approve|deny/);
 			assert.match(renderFooterHints(120, undefined, "normal").join("\n"), /K clear/);
 			assert.match(renderFooterHints(120, undefined, "approvals").join("\n"), /approve/);
@@ -315,6 +337,7 @@ describe("blank-slate MVP foundations", () => {
 			const rendered = viewer.render(100).join("\n");
 			assert.match(rendered, /Artifact viewer/);
 			assert.match(rendered, /DIFF/);
+			assert.match(rendered, /wrap:\s*on/);
 			assert.match(rendered, /final path: src\/file\.txt/);
 			assert.match(rendered, /A.*accept/);
 			assert.match(rendered, /- two/);

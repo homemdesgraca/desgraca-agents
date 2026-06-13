@@ -40,6 +40,7 @@ const MODE_ORDER: DashboardMode[] = ["normal", "logs", "approvals", "artifacts",
 export class Dashboard implements Component {
 	private mode: DashboardMode = "normal";
 	private artifactPreviewIndex = 0;
+	private showArtifactNotes = true;
 	private rightScrollOffset = 0;
 	private notice: { message: string; level: "info" | "warning" | "error" } | undefined;
 	private noticeTimer: ReturnType<typeof setTimeout> | undefined;
@@ -145,6 +146,9 @@ export class Dashboard implements Component {
 			case "artifactOpen":
 				await this.openSelectedArtifact(job);
 				break;
+			case "toggleNotes":
+				this.toggleArtifactNotes();
+				break;
 			case "message":
 				if (!this.requireMode("logs", "Messages are available in TRACKING mode. Press T first.")) break;
 				if (!job) this.showNotice("No selected job.", "warning");
@@ -203,14 +207,30 @@ export class Dashboard implements Component {
 		this.store.resolveApproval(job.id, approval.id, status);
 	}
 
+	private getVisibleArtifacts(job: AgentJob | undefined): AgentArtifact[] {
+		if (!job) return [];
+		return this.showArtifactNotes ? job.artifacts : job.artifacts.filter((artifact) => artifact.kind !== "note");
+	}
+
+	private toggleArtifactNotes(): void {
+		if (this.mode !== "artifacts") {
+			this.showNotice("Note visibility can be toggled in ARTIFACTS mode. Press F first.", "warning");
+			return;
+		}
+		this.showArtifactNotes = !this.showArtifactNotes;
+		this.artifactPreviewIndex = 0;
+		this.rightScrollOffset = 0;
+		this.showNotice(this.showArtifactNotes ? "Notes are visible in ARTIFACTS." : "Notes are hidden in ARTIFACTS.", "info");
+	}
+
 	private moveArtifactSelection(delta: number, job: AgentJob | undefined): void {
 		if (this.mode !== "artifacts") {
 			this.showNotice("Artifact navigation is only active in ARTIFACTS mode.", "warning");
 			return;
 		}
-		const count = job?.artifacts.length ?? 0;
+		const count = this.getVisibleArtifacts(job).length;
 		if (count === 0) {
-			this.showNotice("No artifacts to select.", "warning");
+			this.showNotice(this.showArtifactNotes ? "No artifacts to select." : "No visible artifacts. Press V to show notes.", "warning");
 			return;
 		}
 		this.artifactPreviewIndex = (this.artifactPreviewIndex + delta + count) % count;
@@ -222,12 +242,13 @@ export class Dashboard implements Component {
 			this.showNotice("Artifact open is available in ARTIFACTS mode. Press F first.", "warning");
 			return;
 		}
-		if (!job || job.artifacts.length === 0) {
-			this.showNotice("No artifact selected.", "warning");
+		const artifacts = this.getVisibleArtifacts(job);
+		if (!job || artifacts.length === 0) {
+			this.showNotice(this.showArtifactNotes ? "No artifact selected." : "No visible artifact selected. Press V to show notes.", "warning");
 			return;
 		}
-		this.artifactPreviewIndex = Math.min(this.artifactPreviewIndex, job.artifacts.length - 1);
-		const artifact = job.artifacts[this.artifactPreviewIndex];
+		this.artifactPreviewIndex = Math.min(this.artifactPreviewIndex, artifacts.length - 1);
+		const artifact = artifacts[this.artifactPreviewIndex];
 		if (!artifact) return;
 		await this.actions.openArtifactViewer(job, artifact);
 		this.rightScrollOffset = 0;
@@ -308,20 +329,23 @@ export class Dashboard implements Component {
 		}
 		else if (this.mode === "artifacts") {
 			rightTitleText = "Artifacts";
-			const artifactCount = selected?.artifacts.length ?? 0;
+			const visibleArtifacts = this.getVisibleArtifacts(selected);
+			const artifactCount = visibleArtifacts.length;
 			if (artifactCount > 0) this.artifactPreviewIndex = Math.min(this.artifactPreviewIndex, artifactCount - 1);
 			else this.artifactPreviewIndex = 0;
-			const artifact = selected?.artifacts[this.artifactPreviewIndex];
+			const artifact = visibleArtifacts[this.artifactPreviewIndex];
+			const noteCount = selected?.artifacts.filter((item) => item.kind === "note").length ?? 0;
 			right = [
 				renderSectionTitle(rightTitleText, rightWidth, theme),
-				...renderArtifacts(selected, rightWidth, theme, this.artifactPreviewIndex),
-				...(artifactCount > 0 ? ["", clampLine("Use [ and ] to choose an artifact. Press O or Enter to open the large viewer.", rightWidth)] : []),
+				clampLine(`Notes: ${this.showArtifactNotes ? "shown" : "hidden"}${noteCount > 0 ? ` (${noteCount})` : ""}. Press V to toggle.`, rightWidth),
+				...renderArtifacts(selected, rightWidth, theme, this.artifactPreviewIndex, { showNotes: this.showArtifactNotes }),
+				...(artifactCount > 0 ? ["", clampLine("Use [ and ] to choose a visible item. Press O or Enter to open the large viewer.", rightWidth)] : []),
 				...(artifact ? [
 					"",
 					renderSectionTitle("Selected artifact", rightWidth, theme),
 					clampLine(`Path: ${artifact.path}`, rightWidth),
 					clampLine(`Final path: ${artifact.originalPath ?? "(review-only artifact; no accept target)"}`, rightWidth),
-					clampLine(`Type: ${artifact.kind === "proposal" ? "proposal" : "artifact"}`, rightWidth),
+					clampLine(`Type: ${artifact.kind === "proposal" ? "proposal" : artifact.kind === "note" ? "note" : "artifact"}`, rightWidth),
 					clampLine(`Size: ${artifact.sizeBytes} bytes`, rightWidth),
 				] : []),
 			];

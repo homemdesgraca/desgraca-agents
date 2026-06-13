@@ -65,6 +65,7 @@ async function walkFiles(root: string, cwd: string, agentId: string): Promise<Ag
 			const stat = await fs.stat(absolutePath);
 			const relativeToWorkspace = path.relative(root, absolutePath);
 			const isProposal = relativeToWorkspace === "proposals" || relativeToWorkspace.startsWith(`proposals${path.sep}`);
+			const isNote = relativeToWorkspace === "notes" || relativeToWorkspace.startsWith(`notes${path.sep}`);
 			const originalPath = isProposal ? path.relative("proposals", relativeToWorkspace) : undefined;
 			artifacts.push({
 				id: createId(),
@@ -73,7 +74,7 @@ async function walkFiles(root: string, cwd: string, agentId: string): Promise<Ag
 				absolutePath,
 				sizeBytes: stat.size,
 				updatedAt: stat.mtimeMs,
-				kind: isProposal ? "proposal" : "artifact",
+				kind: isProposal ? "proposal" : isNote ? "note" : "artifact",
 				originalPath,
 			});
 		}

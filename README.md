@@ -18,8 +18,8 @@ The `/agents` screen uses a tall bordered, theme-aware dashboard with an agent l
 - AGENTS mode: `C` creates a new job, `S` starts it, `X` aborts it, `K` clears selected-agent output after confirmation, and `Delete` or `Backspace` deletes it after confirmation. Starting an already-started agent suggests clearing it first.
 - TRACKING mode: `M` sends a follow-up message to the selected agent, including after it is `FINISHED`.
 - APPROVALS mode: `A` approves and `N` denies the first pending approval.
-- ARTIFACTS mode: `[` and `]` move between artifacts, `O` or `Enter` opens a large artifact viewer, and `R` refreshes artifact discovery.
-- Artifact viewer: `Up` / `Down` scroll, `PageUp` / `PageDown` jump between changed lines in diff view, `A` starts a two-step accept flow for proposal artifacts, `D` shows diff for proposal artifacts, `P` shows the proposal/raw artifact, `O` shows the original file for proposal artifacts, `W` toggles wrapping, and `Q` or `Esc` closes the viewer. The viewer shows both the artifact path and the final path that will be created or changed when accepted.
+- ARTIFACTS mode: `[` and `]` move between visible artifacts/notes, `O` or `Enter` opens a large artifact viewer, `V` hides or shows notes, and `R` refreshes artifact discovery.
+- Artifact viewer: wrapping is enabled by default. `Up` / `Down` scroll, `PageUp` / `PageDown` jump between changed lines in diff view, `A` starts a two-step accept flow for proposal artifacts, `D` shows diff for proposal artifacts, `P` shows the proposal/raw artifact, `O` shows the original file for proposal artifacts, `W` toggles wrapping, and `Q` or `Esc` closes the viewer. The viewer shows both the artifact path and the final path that will be created or changed when accepted.
 - `Esc` closes the dashboard.
 
 ## Workspace rule
@@ -30,7 +30,7 @@ Each job may read from the current pi working directory. Job-owned writable outp
 .agents/{AGENT_NAME}
 ```
 
-Each workspace includes `agent-job.json`, which persists the job metadata, logs, approvals, artifacts, selected model, and final response so jobs survive reopening `/agents` or starting a new pi session. Worker agents may read/search the main project and use agent-only tools to create reviewable proposals, inspect artifacts, and manage shared notes. Project-file change proposals are written under `.agents/{AGENT_NAME}/proposals/{ORIGINAL_PATH}`, mirroring the original project structure. Agent notes are stored under `.agents/{AGENT_NAME}/notes` by the note tools. Generated work is not applied automatically; accepting a proposal from the artifact viewer requires an explicit two-step user action.
+Each workspace includes `agent-job.json`, which persists the job metadata, logs, approvals, artifacts, selected model, and final response so jobs survive reopening `/agents` or starting a new pi session. Worker agents may read/search the main project and use agent-only tools to create reviewable proposals, inspect artifacts, and manage shared notes. Project-file change proposals are written under `.agents/{AGENT_NAME}/proposals/{ORIGINAL_PATH}`, mirroring the original project structure. Agent notes are stored under `.agents/{AGENT_NAME}/notes` by the note tools and appear as `notes` entries in ARTIFACTS mode. Generated work is not applied automatically; accepting a proposal from the artifact viewer requires an explicit two-step user action.
 
 ## Permission defaults
 

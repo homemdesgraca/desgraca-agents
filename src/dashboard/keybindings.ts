@@ -22,6 +22,7 @@ export type DashboardAction =
 	| { type: "artifactPrevious" }
 	| { type: "artifactNext" }
 	| { type: "artifactOpen" }
+	| { type: "toggleNotes" }
 	| { type: "scrollUp" }
 	| { type: "scrollDown" };
 
@@ -48,6 +49,7 @@ export function parseDashboardAction(input: string): DashboardAction | undefined
 	if (input === "]") return { type: "artifactNext" };
 	if (input === "o" || input === "O") return { type: "artifactOpen" };
 	if (matchesKey(input, "enter")) return { type: "artifactOpen" };
+	if (input === "v" || input === "V") return { type: "toggleNotes" };
 	if (matchesKey(input, "delete") || matchesKey(input, "backspace")) return { type: "delete" };
 	if (matchesKey(input, "up")) return { type: "scrollUp" };
 	if (matchesKey(input, "down")) return { type: "scrollDown" };
