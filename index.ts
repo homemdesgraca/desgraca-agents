@@ -41,7 +41,25 @@ export async function acceptArtifactProposal(job: AgentJob, artifact: AgentArtif
 	if (!isPathInside(projectRoot, targetPath) || isPathInside(agentsRoot, targetPath)) {
 		throw new Error(`Refusing to accept proposal outside the main project tree: ${targetPath}`);
 	}
-	const content = await fs.readFile(artifact.absolutePath, "utf8");
+
+	const proposalRoot = path.resolve(job.writableRoot, "proposals");
+	const sourcePath = path.resolve(artifact.absolutePath);
+	const expectedSourcePath = path.resolve(proposalRoot, artifact.originalPath);
+	if (sourcePath !== expectedSourcePath) {
+		throw new Error(`Refusing to accept proposal from unexpected source path: ${sourcePath}. Expected ${expectedSourcePath}.`);
+	}
+	let realProposalRoot: string;
+	let realSourcePath: string;
+	try {
+		[realProposalRoot, realSourcePath] = await Promise.all([fs.realpath(proposalRoot), fs.realpath(sourcePath)]);
+	} catch {
+		throw new Error(`Refusing to accept proposal because its source is not readable under ${proposalRoot}.`);
+	}
+	if (!isPathInside(realProposalRoot, realSourcePath)) {
+		throw new Error(`Refusing to accept proposal source outside ${proposalRoot}: ${sourcePath}`);
+	}
+
+	const content = await fs.readFile(sourcePath, "utf8");
 	await withFileMutationQueue(targetPath, async () => {
 		await fs.mkdir(path.dirname(targetPath), { recursive: true });
 		await fs.writeFile(targetPath, content, "utf8");
@@ -340,7 +358,7 @@ export default function desgracaAgentsExtension(pi: ExtensionAPI) {
 			await ctx.ui.custom((_tui, theme, _kb, done) => {
 				const container = new Container();
 				container.addChild(new Text(theme.fg("accent", theme.bold("desgraca-agents permission settings")), 1, 0));
-				container.addChild(new Text(theme.fg("dim", "Toggle policies between allow, ask, and deny. Proposal tools are agent-only; bash/write/edit remain sensitive."), 1, 0));
+				container.addChild(new Text(theme.fg("dim", "Toggle policies between allow, ask, and deny. Proposal and artifact-view tools are agent-only; bash remains sensitive if enabled."), 1, 0));
 				const items: SettingItem[] = tools.map((tool) => ({
 					id: tool,
 					label: tool,

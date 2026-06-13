@@ -368,6 +368,35 @@ describe("blank-slate MVP foundations", () => {
 			});
 			assert.match(message, /Accepted proposal/);
 			assert.equal(await fsp.readFile(path.join(cwd, "src", "accepted.txt"), "utf8"), "accepted content\n");
+
+			const outsideSource = path.join(cwd, "outside-source.txt");
+			await fsp.writeFile(outsideSource, "unexpected content\n");
+			await assert.rejects(
+				() => acceptArtifactProposal(job, {
+					id: "artifact-2",
+					agentId: job.id,
+					path: "outside-source.txt",
+					absolutePath: outsideSource,
+					sizeBytes: 19,
+					updatedAt: Date.now(),
+					kind: "proposal",
+					originalPath: path.join("src", "accepted.txt"),
+				}),
+				/unexpected source path/,
+			);
+			await assert.rejects(
+				() => acceptArtifactProposal(job, {
+					id: "artifact-3",
+					agentId: job.id,
+					path: path.join(".agents", job.name, "proposals", "src", "accepted.txt"),
+					absolutePath: proposalPath,
+					sizeBytes: 17,
+					updatedAt: Date.now(),
+					kind: "proposal",
+					originalPath: path.join("src", "other.txt"),
+				}),
+				/unexpected source path/,
+			);
 		} finally {
 			await fsp.rm(cwd, { recursive: true, force: true });
 		}
