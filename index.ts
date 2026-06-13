@@ -19,15 +19,15 @@ import { checkAgentReadScope, checkAgentWriteScope, isPathInside } from "./src/p
 import { createDefaultSettings, cycleToolPolicy, knownPolicyTools, setToolPolicy, type AgentExtensionSettings, type ToolPolicy } from "./src/settings/settings.ts";
 
 const SETTINGS_ENTRY = "desgraca-agents-settings";
-const PROPOSAL_TOOL_NAMES = ["agent_write_proposal", "agent_edit_proposal"];
+const PROPOSAL_TOOL_NAMES = ["agent_write_proposal", "agent_edit_proposal", "agent_view_artifacts"];
 
 function normalizeSettings(saved: Partial<AgentExtensionSettings> = {}): AgentExtensionSettings {
 	const defaults = createDefaultSettings();
 	return {
 		...defaults,
 		...saved,
-		toolPolicies: { ...defaults.toolPolicies, ...(saved.toolPolicies ?? {}) },
-		childRunnerTools: Array.from(new Set([...(saved.childRunnerTools ?? defaults.childRunnerTools), ...PROPOSAL_TOOL_NAMES])),
+		toolPolicies: Object.fromEntries(Object.entries({ ...defaults.toolPolicies, ...(saved.toolPolicies ?? {}) }).filter(([tool]) => tool !== "write" && tool !== "edit")),
+		childRunnerTools: Array.from(new Set([...(saved.childRunnerTools ?? defaults.childRunnerTools), ...PROPOSAL_TOOL_NAMES])).filter((tool) => tool !== "write" && tool !== "edit"),
 	};
 }
 

@@ -102,7 +102,7 @@ after(async () => {
 });
 
 describe("blank-slate MVP foundations", () => {
-	test("default policies allow read/search and ask before bash/write/edit", async () => {
+	test("default policies allow read/search/proposal tools and do not expose write/edit", async () => {
 		const { createDefaultSettings } = await importCompiled("src/settings/settings.js");
 		const settings = createDefaultSettings();
 		assert.equal(settings.toolPolicies.read, "allow");
@@ -110,11 +110,12 @@ describe("blank-slate MVP foundations", () => {
 		assert.equal(settings.toolPolicies.find, "allow");
 		assert.equal(settings.toolPolicies.ls, "allow");
 		assert.equal(settings.toolPolicies.bash, "ask");
-		assert.equal(settings.toolPolicies.write, "ask");
-		assert.equal(settings.toolPolicies.edit, "ask");
+		assert.equal(settings.toolPolicies.write, undefined);
+		assert.equal(settings.toolPolicies.edit, undefined);
 		assert.equal(settings.toolPolicies.agent_write_proposal, "allow");
 		assert.equal(settings.toolPolicies.agent_edit_proposal, "allow");
-		assert.deepEqual(settings.childRunnerTools, ["read", "grep", "find", "ls", "write", "agent_write_proposal", "agent_edit_proposal"]);
+		assert.equal(settings.toolPolicies.agent_view_artifacts, "allow");
+		assert.deepEqual(settings.childRunnerTools, ["read", "grep", "find", "ls", "agent_write_proposal", "agent_edit_proposal", "agent_view_artifacts"]);
 	});
 
 	test("agent jobs are sanitized and isolated under .agents", async () => {
@@ -127,7 +128,7 @@ describe("blank-slate MVP foundations", () => {
 			assert.equal(job.readableRoot, path.resolve(cwd));
 			assert.equal(job.writableRoot, path.join(cwd, ".agents", "module-x-worker"));
 			assert.equal(job.status, "draft");
-			assert.deepEqual(job.allowedTools, ["read", "grep", "find", "ls", "write", "agent_write_proposal", "agent_edit_proposal"]);
+			assert.deepEqual(job.allowedTools, ["read", "grep", "find", "ls", "agent_write_proposal", "agent_edit_proposal", "agent_view_artifacts"]);
 		} finally {
 			await fsp.rm(cwd, { recursive: true, force: true });
 		}
@@ -317,6 +318,30 @@ describe("blank-slate MVP foundations", () => {
 			assert.match(rendered, /\+ TWO/);
 			viewer.handleInput("q");
 			assert.equal(closed, true);
+
+			const lateOriginal = Array.from({ length: 30 }, (_, index) => `same ${index}`).join("\n") + "\nold\n";
+			const lateProposal = Array.from({ length: 30 }, (_, index) => `same ${index}`).join("\n") + "\nnew\n";
+			await fsp.writeFile(originalPath, lateOriginal);
+			await fsp.writeFile(proposalPath, lateProposal);
+			const lateViewer = new ArtifactViewer({
+				job,
+				artifact: {
+					id: "artifact-2",
+					agentId: job.id,
+					path: path.join(".agents", job.name, "proposals", "src", "file.txt"),
+					absolutePath: proposalPath,
+					sizeBytes: lateProposal.length,
+					updatedAt: Date.now(),
+					kind: "proposal",
+					originalPath: path.join("src", "file.txt"),
+				},
+				viewportRows: 16,
+				onClose: () => {},
+			});
+			const lateRendered = lateViewer.render(100).join("\n");
+			assert.match(lateRendered, /- old/);
+			assert.match(lateRendered, /\+ new/);
+			assert.doesNotMatch(lateRendered, /same 0/);
 		} finally {
 			await fsp.rm(cwd, { recursive: true, force: true });
 		}
@@ -390,6 +415,7 @@ describe("blank-slate MVP foundations", () => {
 			});
 			assert.ok(tools.has("agent_write_proposal"));
 			assert.ok(tools.has("agent_edit_proposal"));
+			assert.ok(tools.has("agent_view_artifacts"));
 
 			await fsp.mkdir(path.join(cwd, "src"), { recursive: true });
 			await fsp.writeFile(path.join(cwd, "src", "file.ts"), "const value = 1;\n");
@@ -400,6 +426,12 @@ describe("blank-slate MVP foundations", () => {
 			await tools.get("agent_edit_proposal").execute("tool-2", { originalPath: "src/file.ts", edits: [{ oldText: "const value = 1;", newText: "const value = 3;" }] }, undefined, undefined, { cwd });
 			assert.equal(await fsp.readFile(path.join(cwd, ".agents", "proposal-worker", "proposals", "src", "file.ts"), "utf8"), "const value = 3;\n");
 			assert.equal(await fsp.readFile(path.join(cwd, "src", "file.ts"), "utf8"), "const value = 1;\n");
+			const listResult = await tools.get("agent_view_artifacts").execute("tool-3", {}, undefined, undefined, { cwd });
+			assert.match(listResult.content[0].text, /proposal/);
+			assert.match(listResult.content[0].text, /original: src\/file\.ts/);
+			const diffResult = await tools.get("agent_view_artifacts").execute("tool-4", { path: "src/file.ts" }, undefined, undefined, { cwd });
+			assert.match(diffResult.content[0].text, /- const value = 1;/);
+			assert.match(diffResult.content[0].text, /\+ const value = 3;/);
 		} finally {
 			delete process.env.DESGRACA_AGENT_JOB_ID;
 			delete process.env.DESGRACA_AGENT_NAME;
@@ -408,7 +440,7 @@ describe("blank-slate MVP foundations", () => {
 		}
 	});
 
-	test("agent proposal tools are allowed by default without child UI", async () => {
+	test("agent proposal and artifact-view tools are allowed by default without child UI", async () => {
 		const extension = (await importCompiled("index.js")).default;
 		const handlers = new Map();
 		extension({
@@ -423,6 +455,8 @@ describe("blank-slate MVP foundations", () => {
 			process.env.DESGRACA_AGENT_WRITABLE_ROOT = path.join(cwd, ".agents", "scope-worker");
 			const result = await handlers.get("tool_call")({ toolName: "agent_write_proposal", input: { originalPath: "src/file.ts" } }, { cwd, hasUI: false });
 			assert.equal(result, undefined);
+			const viewResult = await handlers.get("tool_call")({ toolName: "agent_view_artifacts", input: {} }, { cwd, hasUI: false });
+			assert.equal(viewResult, undefined);
 		} finally {
 			delete process.env.DESGRACA_AGENT_JOB_ID;
 			delete process.env.DESGRACA_AGENT_NAME;

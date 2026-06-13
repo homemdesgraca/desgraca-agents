@@ -46,6 +46,82 @@ async function writeProposalFile(destination: string, content: string): Promise<
 	});
 }
 
+function truncateText(content: string, maxBytes = 48_000): string {
+	if (Buffer.byteLength(content, "utf8") <= maxBytes) return content;
+	return `${content.slice(0, maxBytes)}\n... truncated by agent_view_artifacts`;
+}
+
+function plainDiff(originalContent: string, proposalContent: string): string {
+	const original = originalContent.split("\n");
+	const proposal = proposalContent.split("\n");
+	const rows = Math.max(original.length, proposal.length);
+	const lines = ["--- original", "+++ proposal"];
+	for (let index = 0; index < rows; index++) {
+		const before = original[index];
+		const after = proposal[index];
+		if (before === after && before !== undefined) lines.push(`  ${before}`);
+		else {
+			if (before !== undefined) lines.push(`- ${before}`);
+			if (after !== undefined) lines.push(`+ ${after}`);
+		}
+	}
+	return truncateText(lines.join("\n"));
+}
+
+async function walkArtifactFiles(root: string): Promise<Array<{ relativePath: string; absolutePath: string; sizeBytes: number; originalPath?: string; kind: "artifact" | "proposal" }>> {
+	const files: Array<{ relativePath: string; absolutePath: string; sizeBytes: number; originalPath?: string; kind: "artifact" | "proposal" }> = [];
+	async function walk(current: string): Promise<void> {
+		let entries: any[];
+		try {
+			entries = await fs.readdir(current, { withFileTypes: true });
+		} catch {
+			return;
+		}
+		for (const entry of entries) {
+			if (entry.name === "agent-job.json" || entry.name === "agent-job.json.tmp") continue;
+			const absolutePath = path.join(current, entry.name);
+			if (entry.isDirectory()) {
+				await walk(absolutePath);
+				continue;
+			}
+			if (!entry.isFile()) continue;
+			const stat = await fs.stat(absolutePath);
+			const relativePath = path.relative(root, absolutePath);
+			const isProposal = relativePath === "proposals" || relativePath.startsWith(`proposals${path.sep}`);
+			files.push({
+				relativePath,
+				absolutePath,
+				sizeBytes: stat.size,
+				kind: isProposal ? "proposal" : "artifact",
+				originalPath: isProposal ? path.relative("proposals", relativePath) : undefined,
+			});
+		}
+	}
+	await walk(root);
+	return files.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
+}
+
+async function resolveArtifactPath(cwd: string, writableRoot: string, inputPath: string): Promise<{ relativePath: string; absolutePath: string; originalPath?: string; kind: "artifact" | "proposal" }> {
+	const root = path.resolve(writableRoot);
+	const stripped = inputPath.startsWith("@") ? inputPath.slice(1) : inputPath;
+	const candidates = [
+		path.isAbsolute(stripped) ? path.resolve(stripped) : path.resolve(root, stripped),
+		path.resolve(root, "proposals", stripped),
+		path.resolve(cwd, stripped),
+	];
+	for (const candidate of candidates) {
+		if (!isPathInside(root, candidate)) continue;
+		try {
+			const stat = await fs.stat(candidate);
+			if (!stat.isFile()) continue;
+			const relativePath = path.relative(root, candidate);
+			const isProposal = relativePath === "proposals" || relativePath.startsWith(`proposals${path.sep}`);
+			return { relativePath, absolutePath: candidate, kind: isProposal ? "proposal" : "artifact", originalPath: isProposal ? path.relative("proposals", relativePath) : undefined };
+		} catch {}
+	}
+	throw new Error(`Artifact not found in ${root}: ${inputPath}`);
+}
+
 export function registerAgentProposalTools(pi: ExtensionAPI): void {
 	pi.registerTool({
 		name: "agent_write_proposal",
@@ -80,6 +156,52 @@ export function registerAgentProposalTools(pi: ExtensionAPI): void {
 					description: params.description,
 				},
 			};
+		},
+	});
+
+	pi.registerTool({
+		name: "agent_view_artifacts",
+		label: "Agent View Artifacts",
+		description: "List the current isolated artifacts for this worker, or inspect one artifact/proposal. With a path, proposal artifacts return a diff against the original project file when possible.",
+		promptSnippet: "List or inspect artifacts in the current agent workspace, including proposal diffs",
+		promptGuidelines: [
+			"Use agent_view_artifacts when an isolated worker needs to see what artifacts or proposals it has already created.",
+			"Use agent_view_artifacts with a path to inspect a specific artifact or proposal diff instead of reading the original project file and expecting it to contain proposed changes.",
+		],
+		parameters: Type.Object({
+			path: Type.Optional(Type.String({ description: "Optional artifact path, workspace-relative path, .agents path, or original project path for a proposal." })),
+		}),
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			const agent = getAgentProcessEnvContext();
+			if (!agent?.writableRoot) throw new Error("agent_view_artifacts is only available inside a marked desgraca-agents worker process.");
+			const root = path.resolve(agent.writableRoot);
+			if (!params.path?.trim()) {
+				const files = await walkArtifactFiles(root);
+				const text = files.length === 0
+					? `No artifacts found under ${path.relative(ctx.cwd, root) || root}.`
+					: files.map((file, index) => `${index + 1}. ${file.kind} ${path.relative(ctx.cwd, file.absolutePath)} (${file.sizeBytes} bytes)${file.originalPath ? ` original: ${file.originalPath}` : ""}`).join("\n");
+				return { content: [{ type: "text" as const, text }], details: { count: files.length } };
+			}
+
+			const artifact = await resolveArtifactPath(ctx.cwd, root, params.path);
+			const content = await fs.readFile(artifact.absolutePath, "utf8");
+			let text = `Artifact: ${path.relative(ctx.cwd, artifact.absolutePath)}\nType: ${artifact.kind}`;
+			if (artifact.originalPath) text += `\nOriginal: ${artifact.originalPath}`;
+			if (artifact.kind === "proposal" && artifact.originalPath) {
+				const originalPath = path.resolve(ctx.cwd, artifact.originalPath);
+				if (isPathInside(ctx.cwd, originalPath)) {
+					let originalContent = "";
+					try {
+						originalContent = await fs.readFile(originalPath, "utf8");
+					} catch {}
+					text += `\n\n${plainDiff(originalContent, content)}`;
+				} else {
+					text += `\n\n${truncateText(content)}`;
+				}
+			} else {
+				text += `\n\n${truncateText(content)}`;
+			}
+			return { content: [{ type: "text" as const, text }], details: artifact };
 		},
 	});
 

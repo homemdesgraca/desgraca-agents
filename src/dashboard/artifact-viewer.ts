@@ -124,6 +124,7 @@ export class ArtifactViewer implements Component {
 		this.mode = options.artifact.kind === "proposal" && options.artifact.originalPath ? "diff" : "proposal";
 		this.proposalRead = readTextFile(options.artifact.absolutePath);
 		this.refreshOriginalRead();
+		if (this.mode === "diff") this.scrollOffset = this.firstChangeIndex();
 	}
 
 	invalidate(): void {
@@ -143,8 +144,8 @@ export class ArtifactViewer implements Component {
 		}
 		if (matchesKey(data, "up")) this.scrollBy(-1);
 		else if (matchesKey(data, "down")) this.scrollBy(1);
-		else if (matchesKey(data, "pageUp")) this.scrollBy(-this.bodyRows());
-		else if (matchesKey(data, "pageDown")) this.scrollBy(this.bodyRows());
+		else if (matchesKey(data, "pageUp")) this.mode === "diff" ? this.jumpChange(-1) : this.scrollBy(-this.bodyRows());
+		else if (matchesKey(data, "pageDown")) this.mode === "diff" ? this.jumpChange(1) : this.scrollBy(this.bodyRows());
 		else if (matchesKey(data, "home")) this.setScroll(0);
 		else if (matchesKey(data, "end")) this.setScroll(Number.MAX_SAFE_INTEGER);
 		else if (data === "d" || data === "D") this.setMode("diff");
@@ -176,7 +177,7 @@ export class ArtifactViewer implements Component {
 		this.mode = mode;
 		this.notice = undefined;
 		this.awaitingAcceptConfirm = false;
-		this.scrollOffset = 0;
+		this.scrollOffset = mode === "diff" ? this.firstChangeIndex() : 0;
 		this.rerender();
 	}
 
@@ -215,7 +216,7 @@ export class ArtifactViewer implements Component {
 			this.proposalRead = readTextFile(this.options.artifact.absolutePath);
 			this.refreshOriginalRead();
 			this.mode = this.options.artifact.kind === "proposal" && this.options.artifact.originalPath ? "diff" : this.mode;
-			this.scrollOffset = 0;
+			this.scrollOffset = this.mode === "diff" ? this.firstChangeIndex() : 0;
 			this.notice = message;
 		} catch (error) {
 			this.notice = `Accept failed: ${error instanceof Error ? error.message : String(error)}`;
@@ -228,6 +229,28 @@ export class ArtifactViewer implements Component {
 
 	private scrollBy(delta: number): void {
 		this.setScroll(this.scrollOffset + delta);
+	}
+
+	private changedLineIndexes(): number[] {
+		return this.contentLines().map((line, index) => ({ line, index })).filter((item) => item.line.kind === "added" || item.line.kind === "removed").map((item) => item.index);
+	}
+
+	private firstChangeIndex(): number {
+		return this.changedLineIndexes()[0] ?? 0;
+	}
+
+	private jumpChange(delta: number): void {
+		const changes = this.changedLineIndexes();
+		if (changes.length === 0) {
+			this.notice = "No changed lines in this diff.";
+			this.rerender();
+			return;
+		}
+		const next = delta > 0
+			? changes.find((index) => index > this.scrollOffset) ?? changes[changes.length - 1]
+			: [...changes].reverse().find((index) => index < this.scrollOffset) ?? changes[0];
+		this.notice = undefined;
+		this.setScroll(next ?? 0);
 	}
 
 	private setScroll(offset: number): void {
@@ -290,7 +313,7 @@ export class ArtifactViewer implements Component {
 		const theme = this.options.theme;
 		const key = (value: string) => fg(theme, "accent", bold(theme, value));
 		const hints = this.options.artifact.kind === "proposal"
-			? `${key("Up/Down")} scroll  ${key("PgUp/PgDn")} page  ${key("A")} accept  ${key("D")} diff  ${key("P")} proposal  ${key("O")} original  ${key("W")} wrap  ${key("Q/Esc")} close`
+			? `${key("Up/Down")} scroll  ${key("PgUp/PgDn")} changes/page  ${key("A")} accept  ${key("D")} diff  ${key("P")} proposal  ${key("O")} original  ${key("W")} wrap  ${key("Q/Esc")} close`
 			: `${key("Up/Down")} scroll  ${key("PgUp/PgDn")} page  ${key("P")} raw  ${key("W")} wrap  ${key("Q/Esc")} close`;
 		return padLine(hints, width);
 	}

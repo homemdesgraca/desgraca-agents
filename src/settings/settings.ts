@@ -12,16 +12,15 @@ export const DEFAULT_TOOL_POLICIES: Record<string, ToolPolicy> = {
 	find: "allow",
 	ls: "allow",
 	bash: "ask",
-	write: "ask",
-	edit: "ask",
 	agent_write_proposal: "allow",
 	agent_edit_proposal: "allow",
+	agent_view_artifacts: "allow",
 };
 
 export function createDefaultSettings(): AgentExtensionSettings {
 	return {
 		toolPolicies: { ...DEFAULT_TOOL_POLICIES },
-		childRunnerTools: ["read", "grep", "find", "ls", "write", "agent_write_proposal", "agent_edit_proposal"],
+		childRunnerTools: ["read", "grep", "find", "ls", "agent_write_proposal", "agent_edit_proposal", "agent_view_artifacts"],
 		taskWorkspaceDir: ".agents",
 	};
 }
@@ -47,5 +46,5 @@ export function cycleToolPolicy(policy: ToolPolicy): ToolPolicy {
 }
 
 export function knownPolicyTools(settings: AgentExtensionSettings): string[] {
-	return Object.keys(settings.toolPolicies).sort((a, b) => a.localeCompare(b));
+	return Object.keys(settings.toolPolicies).filter((tool) => tool !== "write" && tool !== "edit").sort((a, b) => a.localeCompare(b));
 }
