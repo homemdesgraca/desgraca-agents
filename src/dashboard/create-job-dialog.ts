@@ -30,7 +30,7 @@ export class CreateJobDialog implements Component, Focusable {
 			{ paddingX: 0 },
 		);
 		this.nameInput.onSubmit = () => this.focusTask();
-		this.taskEditor.onSubmit = () => this.submit();
+		this.taskEditor.onSubmit = (task) => this.submit(task);
 		this.syncFocus();
 	}
 
@@ -107,9 +107,9 @@ export class CreateJobDialog implements Component, Focusable {
 		this.tui.requestRender();
 	}
 
-	private submit(): void {
+	private submit(submittedTask?: string): void {
 		const name = this.nameInput.getValue().trim();
-		const task = this.taskEditor.getExpandedText().trim();
+		const task = (submittedTask ?? this.taskEditor.getExpandedText()).trim();
 		if (!name) {
 			this.errorMessage = "Agent job name is required.";
 			this.activeField = "name";

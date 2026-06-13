@@ -10,7 +10,7 @@
 
 ## Dashboard UI and keys
 
-The `/agents` screen uses a bordered, theme-aware dashboard with an agent list pane, selected-agent detail pane, mode tabs, and wrapped footer hints. Press `H` for the full key reference if the compact footer is not enough.
+The `/agents` screen uses a tall bordered, theme-aware dashboard with an agent list pane, selected-agent detail pane, mode tabs, and wrapped footer hints. Press `H` for descriptive help that explains what each dashboard mode shows.
 
 - `C` create a new job with empty name/task fields; `Esc` or `Ctrl+C` cancels and returns to the dashboard.
 - `1`-`9` select an agent job.

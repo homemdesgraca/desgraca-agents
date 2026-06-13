@@ -186,6 +186,9 @@ export class Dashboard implements Component {
 				...renderLogs(selected, rightWidth, 6, theme),
 			];
 		}
+		const minPaneRows = 22;
+		while (left.length < minPaneRows) left.push("");
+		while (right.length < minPaneRows) right.push("");
 		for (const line of splitColumns(left, right, innerWidth, theme)) lines.push(renderBoxedLine(line, safeWidth, theme));
 		lines.push(renderDivider(safeWidth, theme));
 		for (const line of renderFooterHints(innerWidth, theme)) lines.push(renderBoxedLine(line, safeWidth, theme));

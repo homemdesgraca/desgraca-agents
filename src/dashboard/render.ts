@@ -295,12 +295,16 @@ export function renderFooterHints(width: number, theme?: Theme): string[] {
 
 export function renderHelp(width: number, theme?: Theme): string[] {
 	const lines = [
-		`${key(theme, "C")} create a task-scoped agent job.`,
-		`${key(theme, "1-9")} select an agent job. In artifact mode, the same keys preview artifacts for the selected agent.`,
-		`${key(theme, "S")} start the selected job; ${key(theme, "X")} abort it.`,
-		`${key(theme, "A")} approve the first pending approval; ${key(theme, "N")} deny it.`,
-		`${key(theme, "L")} logs mode; ${key(theme, "P")} approvals mode; ${key(theme, "D")} artifacts mode; ${key(theme, "Enter")} return to normal mode.`,
-		`${key(theme, "R")} refresh artifact discovery. ${key(theme, "Q/Esc")} close the dashboard.`,
+		`${key(theme, "C")} create a task-scoped agent job. Opens an empty overlay for the worker name and task; cancelling returns to this dashboard without creating anything.`,
+		`${key(theme, "1-9")} select an agent job from the left pane. The selected job drives every detail view and action.`,
+		`${key(theme, "S")} start the selected job in its isolated workspace. ${key(theme, "X")} aborts the selected job if it is running.`,
+		`${key(theme, "Normal mode")} shows the selected agent's identity, status, readable root, writable root, allowed tools, task, process state, and recent logs.`,
+		`${key(theme, "Logs mode")} shows a larger slice of recent worker events, subprocess output summaries, status changes, and refresh messages.`,
+		`${key(theme, "Approvals mode")} shows pending sensitive tool requests for the selected agent, including tool name, input summary, policy reason, and simple risk warnings.`,
+		`${key(theme, "Artifacts mode")} lists files discovered under the selected agent's .agents workspace. Press ${key(theme, "1-9")} in this mode to preview an artifact without applying it to the project.`,
+		`${key(theme, "Help mode")} is this reference view. Press ${key(theme, "Enter")} to return to normal mode.`,
+		`${key(theme, "A")} approves the first pending approval for the selected agent. ${key(theme, "N")} denies it.`,
+		`${key(theme, "R")} refreshes artifact discovery for the selected agent. ${key(theme, "Q/Esc")} closes the dashboard.`,
 	];
 	return lines.flatMap((line) => wrapWords(line, width)).map((line) => clampLine(line, width));
 }
