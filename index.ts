@@ -5,6 +5,7 @@ import { Container, type SettingItem, SettingsList, Text } from "@earendil-works
 import { getAgentProcessEnvContext } from "./src/agents/agent-env.ts";
 import { AgentStore } from "./src/agents/agent-store.ts";
 import { PiSubprocessAgentRunner } from "./src/agents/agent-runner.ts";
+import { CreateJobDialog, type CreateJobDialogResult } from "./src/dashboard/create-job-dialog.ts";
 import { Dashboard } from "./src/dashboard/Dashboard.ts";
 import { decideToolPolicy } from "./src/permissions/policies.ts";
 import { checkAgentReadScope, checkAgentWriteScope } from "./src/permissions/scope-guard.ts";
@@ -147,11 +148,24 @@ export default function desgracaAgentsExtension(pi: ExtensionAPI) {
 						close: () => done(undefined),
 						notify: (message, level = "info") => ctx.ui.notify(message, level),
 						createJob: async () => {
-							const name = await ctx.ui.input("Agent job name", "module-x-worker");
-							if (!name) return;
-							const task = await ctx.ui.editor("Agent task", "Describe the narrow task this worker should perform.");
-							if (!task) return;
-							const job = store.create(ctx.cwd, name, task);
+							const result = await ctx.ui.custom<CreateJobDialogResult | undefined>(
+								(dialogTui, dialogTheme, _dialogKeybindings, dialogDone) => new CreateJobDialog(dialogTui, dialogTheme, dialogDone),
+								{
+									overlay: true,
+									overlayOptions: {
+										anchor: "center",
+										width: "90%",
+										minWidth: 54,
+										maxHeight: "85%",
+										margin: 2,
+									},
+								},
+							);
+							if (!result) {
+								_tui.requestRender();
+								return;
+							}
+							const job = store.create(ctx.cwd, result.name, result.task);
 							await fs.mkdir(job.writableRoot, { recursive: true });
 							store.appendLog(job.id, `Workspace ready: ${job.writableRoot}`);
 						},

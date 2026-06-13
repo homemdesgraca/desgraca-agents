@@ -12,7 +12,7 @@
 
 The `/agents` screen uses a bordered, theme-aware dashboard with an agent list pane, selected-agent detail pane, mode tabs, and wrapped footer hints. Press `H` for the full key reference if the compact footer is not enough.
 
-- `C` create a new job.
+- `C` create a new job with empty name/task fields; `Esc` or `Ctrl+C` cancels and returns to the dashboard.
 - `1`-`9` select an agent job.
 - `S` start the selected job.
 - `X` abort the selected job.
