@@ -9,7 +9,7 @@ type FgColor = Parameters<Theme["fg"]>[0];
 type BgColor = Parameters<Theme["bg"]>[0];
 
 const MODE_LABELS: Record<DashboardMode, string> = {
-	normal: "NORMAL",
+	normal: "AGENTS",
 	logs: "LOGS",
 	approvals: "APPROVALS",
 	artifacts: "ARTIFACTS",
@@ -189,6 +189,22 @@ function renderField(label: string, value: string, width: number, theme?: Theme)
 	});
 }
 
+function renderFinalResponse(job: AgentJob, width: number, theme?: Theme): string[] {
+	const labelText = `${fg(theme, "dim", "Final Response:")} `;
+	const labelWidth = visibleWidth("Final Response: ");
+	const valueWidth = Math.max(8, width - labelWidth);
+	if (!job.finalResponse?.trim()) return [clampLine(`${labelText}${fg(theme, "muted", "(not available yet)")}`, width)];
+
+	const wrapped = job.finalResponse.split("\n").flatMap((line) => wrapWords(line || " ", valueWidth));
+	const truncated = wrapped.length > 4;
+	const visible = wrapped.slice(0, 4);
+	if (truncated) visible[visible.length - 1] = "… check Logs mode for full output.";
+	return visible.map((line, index) => {
+		const prefix = index === 0 ? labelText : " ".repeat(labelWidth);
+		return clampLine(prefix + fg(theme, "text", line), width);
+	});
+}
+
 export function renderJobDetails(job: AgentJob | undefined, width: number, theme?: Theme): string[] {
 	if (!job) return [clampLine(fg(theme, "dim", "Select or create an agent job."), width)];
 	return [
@@ -198,21 +214,35 @@ export function renderJobDetails(job: AgentJob | undefined, width: number, theme
 		...renderField("Writable root", job.writableRoot, width, theme),
 		...renderField("Allowed tools", job.allowedTools.join(", ") || "(none)", width, theme),
 		...renderField("Task", job.task || "(empty)", width, theme),
+		...renderFinalResponse(job, width, theme),
 		clampLine(`${fg(theme, "dim", "Process:")} ${fg(theme, "text", job.process?.pid ? `pid ${job.process.pid}` : "not running")}${job.process?.readOnly ? fg(theme, "warning", " | read-only runner") : ""}`, width),
 	];
 }
 
-export function renderLogs(job: AgentJob | undefined, width: number, count = 12, theme?: Theme): string[] {
+interface RenderLogsOptions {
+	wrap?: boolean;
+}
+
+export function renderLogs(job: AgentJob | undefined, width: number, count = 12, theme?: Theme, options: RenderLogsOptions = {}): string[] {
 	if (!job) return [clampLine(fg(theme, "dim", "No selected job."), width)];
 	const logs = job.logs.slice(-count);
 	if (logs.length === 0) return [clampLine(fg(theme, "dim", "No logs."), width)];
-	return logs.flatMap((log) =>
-		log.message.split("\n").slice(0, 4).map((line, index) => {
+	return logs.flatMap((log) => {
+		const messageLines = options.wrap ? log.message.split("\n") : log.message.split("\n").slice(0, 4);
+		return messageLines.flatMap((line, index) => {
 			const levelColor: FgColor = log.level === "error" ? "error" : log.level === "warning" ? "warning" : "muted";
 			const stamp = index === 0 ? fg(theme, "dim", formatTime(log.timestamp)) : fg(theme, "dim", "        ");
-			return clampLine(`${stamp} ${fg(theme, levelColor, log.level)} ${fg(theme, "toolOutput", line)}`, width);
-		}),
-	);
+			const prefix = `${stamp} ${fg(theme, levelColor, log.level)} `;
+			if (!options.wrap) return [clampLine(`${prefix}${fg(theme, "toolOutput", line)}`, width)];
+			const prefixWidth = visibleWidth(`${index === 0 ? formatTime(log.timestamp) : "        "} ${log.level} `);
+			const messageWidth = Math.max(8, width - prefixWidth);
+			const wrapped = wrapWords(line || " ", messageWidth);
+			return wrapped.map((part, wrappedIndex) => {
+				const wrappedPrefix = wrappedIndex === 0 ? prefix : " ".repeat(prefixWidth);
+				return clampLine(`${wrappedPrefix}${fg(theme, "toolOutput", part)}`, width);
+			});
+		});
+	});
 }
 
 export function renderApprovals(job: AgentJob | undefined, width: number, theme?: Theme): string[] {
@@ -298,11 +328,11 @@ export function renderHelp(width: number, theme?: Theme): string[] {
 		`${key(theme, "C")} create a task-scoped agent job. Opens an empty overlay for the worker name and task; cancelling returns to this dashboard without creating anything.`,
 		`${key(theme, "1-9")} select an agent job from the left pane. The selected job drives every detail view and action.`,
 		`${key(theme, "S")} start the selected job in its isolated workspace. ${key(theme, "X")} aborts the selected job if it is running.`,
-		`${key(theme, "Normal mode")} shows the selected agent's identity, status, readable root, writable root, allowed tools, task, process state, and recent logs.`,
+		`${key(theme, "Agents mode")} shows the selected agent's identity, status, readable root, writable root, allowed tools, task, final response preview, process state, and recent logs.`,
 		`${key(theme, "Logs mode")} shows a larger slice of recent worker events, subprocess output summaries, status changes, and refresh messages.`,
 		`${key(theme, "Approvals mode")} shows pending sensitive tool requests for the selected agent, including tool name, input summary, policy reason, and simple risk warnings.`,
 		`${key(theme, "Artifacts mode")} lists files discovered under the selected agent's .agents workspace. Press ${key(theme, "1-9")} in this mode to preview an artifact without applying it to the project.`,
-		`${key(theme, "Help mode")} is this reference view. Press ${key(theme, "Enter")} to return to normal mode.`,
+		`${key(theme, "Help mode")} is this reference view. Press ${key(theme, "Enter")} to return to agents mode.`,
 		`${key(theme, "A")} approves the first pending approval for the selected agent. ${key(theme, "N")} denies it.`,
 		`${key(theme, "R")} refreshes artifact discovery for the selected agent. ${key(theme, "Q/Esc")} closes the dashboard.`,
 	];

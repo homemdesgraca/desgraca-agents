@@ -15,7 +15,7 @@ export type DashboardAction =
 	| { type: "normal" }
 	| { type: "refresh" };
 
-export const DASHBOARD_HELP_TEXT = "H opens full help. Enter returns to normal mode.";
+export const DASHBOARD_HELP_TEXT = "H opens full help. Enter returns to agents mode.";
 
 export function parseDashboardAction(input: string): DashboardAction | undefined {
 	if (matchesKey(input, "escape") || input === "q" || input === "Q") return { type: "close" };

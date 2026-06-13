@@ -47,6 +47,7 @@ export interface AgentJob {
 	id: string;
 	name: string;
 	task: string;
+	finalResponse?: string;
 	status: AgentJobStatus;
 	allowedTools: string[];
 	readableRoot: string;

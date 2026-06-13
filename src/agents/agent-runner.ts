@@ -136,7 +136,10 @@ export class PiSubprocessAgentRunner implements AgentRunner {
 				const event = JSON.parse(line) as { type?: string; message?: any; toolName?: string; error?: string };
 				if (event.type === "message_end" && event.message?.role === "assistant") {
 					const text = event.message.content?.find?.((part: any) => part.type === "text")?.text;
-					if (text) this.store.appendLog(jobId, text.split("\n").slice(0, 8).join("\n"));
+					if (text) {
+						this.store.update(jobId, { finalResponse: text });
+						this.store.appendLog(jobId, `Final response:\n${text}`);
+					}
 				}
 				if (event.type === "tool_execution_start" && event.toolName) {
 					this.store.appendLog(jobId, `Child tool: ${event.toolName}`, "debug");

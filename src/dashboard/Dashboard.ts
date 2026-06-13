@@ -34,6 +34,8 @@ export interface DashboardActions {
 export class Dashboard implements Component {
 	private mode: DashboardMode = "normal";
 	private artifactPreviewIndex: number | undefined;
+	private notice: { message: string; level: "info" | "warning" | "error" } | undefined;
+	private noticeTimer: ReturnType<typeof setTimeout> | undefined;
 	private cachedWidth: number | undefined;
 	private cachedLines: string[] | undefined;
 	private unsubscribe: (() => void) | undefined;
@@ -54,6 +56,8 @@ export class Dashboard implements Component {
 	dispose(): void {
 		this.unsubscribe?.();
 		this.unsubscribe = undefined;
+		if (this.noticeTimer) clearTimeout(this.noticeTimer);
+		this.noticeTimer = undefined;
 	}
 
 	invalidate(): void {
@@ -88,7 +92,7 @@ export class Dashboard implements Component {
 				await this.actions.createJob();
 				break;
 			case "start":
-				if (!job) this.actions.notify("Create or select a job first.", "warning");
+				if (!job) this.showNotice("Create or select a job first.", "warning");
 				else await this.runner.start(job.id);
 				break;
 			case "abort":
@@ -127,7 +131,7 @@ export class Dashboard implements Component {
 	private resolveFirstApproval(job: AgentJob | undefined, status: "approved" | "denied"): void {
 		const approval = job?.pendingApprovals.find((item) => item.status === "pending");
 		if (!job || !approval) {
-			this.actions.notify("No pending approval selected.", "warning");
+			this.showNotice("No pending approval selected.", "warning");
 			return;
 		}
 		this.store.resolveApproval(job.id, approval.id, status);
@@ -135,11 +139,22 @@ export class Dashboard implements Component {
 
 	private async refreshArtifacts(job: AgentJob | undefined): Promise<void> {
 		if (!job) {
-			this.actions.notify("No selected job.", "warning");
+			this.showNotice("No selected job.", "warning");
 			return;
 		}
 		this.store.setArtifacts(job.id, await discoverArtifacts(job));
 		this.store.appendLog(job.id, "Artifacts refreshed.");
+	}
+
+	private showNotice(message: string, level: "info" | "warning" | "error" = "info"): void {
+		this.notice = { message, level };
+		if (this.noticeTimer) clearTimeout(this.noticeTimer);
+		this.noticeTimer = setTimeout(() => {
+			this.notice = undefined;
+			this.noticeTimer = undefined;
+			this.invalidateAndRender();
+		}, 3500);
+		this.invalidateAndRender();
 	}
 
 	private invalidateAndRender(): void {
@@ -162,11 +177,15 @@ export class Dashboard implements Component {
 		lines.push(renderTopBorder(safeWidth, " Agent control dashboard ", theme));
 		for (const line of renderHeader(innerWidth, this.mode, theme, selected)) lines.push(renderBoxedLine(line, safeWidth, theme));
 		for (const line of renderModeTabs(this.mode, innerWidth, theme)) lines.push(renderBoxedLine(line, safeWidth, theme));
+		if (this.notice) {
+			const color = this.notice.level === "error" ? "error" : this.notice.level === "warning" ? "warning" : "accent";
+			lines.push(renderBoxedLine(theme ? theme.fg(color, this.notice.message) : this.notice.message, safeWidth, theme));
+		}
 		lines.push(renderDivider(safeWidth, theme));
 
 		const left = [renderSectionTitle("Agents", leftWidth, theme), ...renderJobList(jobs, selectedId, leftWidth, theme)];
 		let right: string[];
-		if (this.mode === "logs") right = [renderSectionTitle("Logs", rightWidth, theme), ...renderLogs(selected, rightWidth, 18, theme)];
+		if (this.mode === "logs") right = [renderSectionTitle("Logs", rightWidth, theme), ...renderLogs(selected, rightWidth, 18, theme, { wrap: true })];
 		else if (this.mode === "approvals") right = [renderSectionTitle("Approvals", rightWidth, theme), ...renderApprovals(selected, rightWidth, theme)];
 		else if (this.mode === "artifacts") {
 			const artifact = selected?.artifacts[this.artifactPreviewIndex ?? -1];
@@ -179,7 +198,7 @@ export class Dashboard implements Component {
 		} else if (this.mode === "help") right = [renderSectionTitle("Help", rightWidth, theme), ...renderHelp(rightWidth, theme)];
 		else {
 			right = [
-				renderSectionTitle("Selected agent", rightWidth, theme),
+				renderSectionTitle("Agent description", rightWidth, theme),
 				...renderJobDetails(selected, rightWidth, theme),
 				"",
 				renderSectionTitle("Recent logs", rightWidth, theme),

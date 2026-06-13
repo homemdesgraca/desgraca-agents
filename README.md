@@ -10,7 +10,7 @@
 
 ## Dashboard UI and keys
 
-The `/agents` screen uses a tall bordered, theme-aware dashboard with an agent list pane, selected-agent detail pane, mode tabs, and wrapped footer hints. Press `H` for descriptive help that explains what each dashboard mode shows.
+The `/agents` screen uses a tall bordered, theme-aware dashboard with an agent list pane, agent description pane, mode tabs, and wrapped footer hints. Press `H` for descriptive help that explains what each dashboard mode shows.
 
 - `C` create a new job with empty name/task fields; `Esc` or `Ctrl+C` cancels and returns to the dashboard.
 - `1`-`9` select an agent job.
@@ -18,7 +18,8 @@ The `/agents` screen uses a tall bordered, theme-aware dashboard with an agent l
 - `X` abort the selected job.
 - `A` approve the first pending approval.
 - `N` deny the first pending approval.
-- `L` show logs.
+- `Enter` return to the main `AGENTS` screen.
+- `L` show wrapped logs.
 - `P` show approvals.
 - `D` show artifacts; in artifact mode, `1`-`9` previews an artifact.
 - `R` refresh artifacts.
