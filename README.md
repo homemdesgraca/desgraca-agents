@@ -1,0 +1,40 @@
+# desgraca-agents
+
+`desgraca-agents` is a pi extension for supervising task-scoped agent jobs from a dedicated dashboard.
+
+## Commands
+
+- `/agents` opens the agent dashboard in TUI mode.
+- `/agent-settings` opens agent-scoped permission policy settings.
+- `/agent-policy-cycle <tool>` cycles one agent-scoped tool policy between `allow`, `ask`, and `deny`.
+
+## Dashboard keys
+
+- `C` create a new job.
+- `1`-`9` select an agent job.
+- `S` start the selected job.
+- `X` abort the selected job.
+- `A` approve the first pending approval.
+- `N` deny the first pending approval.
+- `L` show logs.
+- `P` show approvals.
+- `D` show artifacts; in artifact mode, `1`-`9` previews an artifact.
+- `R` refresh artifacts.
+- `H` show help.
+- `Q` or `Esc` close the dashboard.
+
+## Workspace rule
+
+Each job may read from the current pi working directory. Job-owned writable output belongs under:
+
+```text
+.agents/{AGENT_NAME}
+```
+
+The MVP runner starts child pi processes in read-only mode (`read`, `grep`, `find`, and `ls`) until full child tool-call approval is implemented. Generated work is not applied automatically to the main project.
+
+## Permission defaults
+
+These permission policies are agent-scoped only. `desgraca-agents` does not intercept or approve normal plain-LLM tool calls in the parent pi session; those should remain owned by your regular approval extensions or pi configuration.
+
+For marked agent subprocesses, read/search tools are allowed by default. `bash`, `write`, and `edit` ask for approval by default if they are ever enabled for an agent. Simple bash warnings are surfaced for patterns such as `rm`, `curl`, `wget`, `sudo`, `chmod`, `chown`, `kill`, and shell redirection.
