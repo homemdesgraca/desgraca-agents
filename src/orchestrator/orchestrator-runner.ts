@@ -158,7 +158,7 @@ export class PiSubprocessOrchestratorRunner implements OrchestratorRunner {
 			"When you need workers, use orchestrator_create_agent_draft with only name, task, and order.",
 			"Workers with the same numeric order are intended to be parallelizable as a user-started group in AGENTS mode; different order values are only a planning sequence, not an automatic dependency graph.",
 			"Do not set worker model, permissions, or advanced configuration. The user controls those in AGENTS mode and settings.",
-			"To start a worker, use orchestrator_request_start_agent. This asks the user for approval and never starts a worker unconditionally.",
+			"To start workers, use orchestrator_request_start_agent with an order number. If one worker has that order, it requests that worker; if multiple workers share that order, it requests the user to start the group. This asks the user for approval and never starts workers unconditionally.",
 			"If waitForResponse is true, you will wait until the user denies the start or the worker reaches done, failed, or aborted. If the worker is blocked on approvals, keep waiting.",
 			"Use orchestrator_list_agent_statuses and orchestrator_get_agent_details to inspect progress before deciding next steps.",
 			"Use orchestrator_update_plan to keep a concise current plan for the user.",

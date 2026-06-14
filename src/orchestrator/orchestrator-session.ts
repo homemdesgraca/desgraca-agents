@@ -68,12 +68,19 @@ export interface OrchestratorWorkerDraft {
 
 export type OrchestratorStartRequestStatus = "pending" | "approved" | "denied" | "started" | "done" | "failed" | "aborted";
 
+export type OrchestratorStartRequestKind = "agent" | "order";
+
 export interface OrchestratorStartRequest {
 	id: string;
 	sessionId: string;
+	kind?: OrchestratorStartRequestKind;
 	draftId?: string;
+	draftIds?: string[];
 	agentJobId?: string;
+	agentJobIds?: string[];
 	agentName: string;
+	agentNames?: string[];
+	order?: number;
 	waitForResponse: boolean;
 	status: OrchestratorStartRequestStatus;
 	message: string;

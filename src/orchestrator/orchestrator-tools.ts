@@ -63,16 +63,19 @@ async function waitForStartRequest(request: OrchestratorStartRequest, signal?: A
 	while (true) {
 		await agentStore.reloadFromDisk(context.cwd);
 		await orchestratorStore.loadFromDisk(context.cwd);
+		await orchestratorStore.refreshStartRequestsFromJobs();
 		const requests = await orchestratorStore.listStartRequests(request.sessionId);
 		const latest = requests.find((item) => item.id === request.id);
 		if (!latest) throw new Error(`Start request disappeared: ${request.id}`);
 		if (latest.status === "denied") return `Start request denied: ${latest.denialReason ?? "Denied by user."}`;
-		if (["done", "failed", "aborted"].includes(latest.status)) return `Agent ${latest.agentName} finished with request status ${latest.status}. ${latest.resultSummary ?? ""}`.trim();
-		if (latest.agentJobId) {
-			const job = agentStore.get(latest.agentJobId);
-			if (terminalStatus(job?.status)) {
+		if (["done", "failed", "aborted"].includes(latest.status)) return `Start request ${latest.agentName} finished with status ${latest.status}.\n${latest.resultSummary ?? ""}`.trim();
+		const ids = latest.agentJobIds?.length ? latest.agentJobIds : latest.agentJobId ? [latest.agentJobId] : [];
+		if (ids.length > 0) {
+			const jobs = ids.map((id) => agentStore.get(id)).filter(Boolean);
+			if (jobs.length === ids.length && jobs.every((job: any) => terminalStatus(job?.status))) {
 				await orchestratorStore.refreshStartRequestsFromJobs();
-				return `Agent ${latest.agentName} finished with status ${job?.status}. ${job?.finalResponse ? truncateText(job.finalResponse, 4000) : ""}`.trim();
+				const refreshed = (await orchestratorStore.listStartRequests(request.sessionId)).find((item) => item.id === request.id);
+				return `Start request ${latest.agentName} finished with status ${refreshed?.status ?? latest.status}.\n${refreshed?.resultSummary ?? ""}`.trim();
 			}
 		}
 		await sleep(POLL_INTERVAL_MS, signal);
@@ -169,17 +172,18 @@ export function registerOrchestratorTools(pi: ExtensionAPI): void {
 
 	pi.registerTool({
 		name: "orchestrator_request_start_agent",
-		label: "Orchestrator Request Start Agent",
-		description: "Ask the user to start a drafted agent, optionally waiting for the response.",
-		promptSnippet: "Request user approval to start an agent",
-		promptGuidelines: ["This creates a user-mediated start request; it does not directly start the worker.", "Set waitForResponse when later steps depend on this worker's result."],
+		label: "Orchestrator Request Start",
+		description: "Ask the user to start drafted worker(s) by numeric order, or by legacy worker name, optionally waiting for responses.",
+		promptSnippet: "Request user approval to start worker order",
+		promptGuidelines: ["Prefer order: provide the numeric order to request starting the single worker or same-order group for that order.", "Name is supported only for legacy single-worker requests.", "This creates a user-mediated start request; it does not directly start workers.", "Set waitForResponse when later steps depend on worker results; order requests return each started agent's final response."],
 		parameters: Type.Object({
-			name: Type.String({ description: "Worker name." }),
-			waitForResponse: Type.Optional(Type.Boolean({ description: "Whether to wait for denial or terminal worker result." })),
+			order: Type.Optional(Type.Number({ description: "Numeric worker order to start. Starts all workers in that order within the active session." })),
+			name: Type.Optional(Type.String({ description: "Legacy worker name for single-agent starts. Prefer order." })),
+			waitForResponse: Type.Optional(Type.Boolean({ description: "Whether to wait for denial or terminal worker result(s)." })),
 		}),
 		async execute(_toolCallId, params, signal) {
 			const { context, orchestratorStore } = await createStores();
-			const request = await orchestratorStore.createStartRequest(context.sessionId, { name: params.name, waitForResponse: params.waitForResponse });
+			const request = await orchestratorStore.createStartRequest(context.sessionId, { name: params.name, order: params.order, waitForResponse: params.waitForResponse });
 			if (!params.waitForResponse) return toolText(`Start request created for ${request.agentName}. Waiting for user approval.`, { request });
 			const result = await waitForStartRequest(request, signal);
 			return toolText(result, { requestId: request.id });

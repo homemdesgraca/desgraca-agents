@@ -23,6 +23,7 @@ import { Dashboard } from "./src/dashboard/Dashboard.ts";
 import { DeleteAgentDialog } from "./src/dashboard/delete-agent-dialog.ts";
 import { DeleteOrchestratorSessionDialog } from "./src/dashboard/delete-orchestrator-session-dialog.ts";
 import { EditOrchestratorSessionDialog, type EditOrchestratorSessionDialogResult } from "./src/dashboard/edit-orchestrator-session-dialog.ts";
+import { OrchestratorStartRequestDialog } from "./src/dashboard/orchestrator-start-request-dialog.ts";
 import { StartAgentGroupDialog } from "./src/dashboard/start-agent-group-dialog.ts";
 import { TrackingMessageDialog } from "./src/dashboard/tracking-message-dialog.ts";
 import { decideOrchestratorToolPolicy, decideToolPolicy } from "./src/permissions/policies.ts";
@@ -517,32 +518,74 @@ export default function desgracaAgentsExtension(pi: ExtensionAPI) {
 							_tui.requestRender();
 						},
 						approveOrchestratorStartRequest: async (sessionId, requestId) => {
+							await orchestratorStore.syncAllDrafts(settings);
 							const requests = await orchestratorStore.listStartRequests(sessionId);
 							const request = requests.find((item) => item.id === requestId);
 							if (!request) {
 								ctx.ui.notify("Start request no longer exists.", "warning");
 								return;
 							}
-							const ok = await ctx.ui.confirm("Start orchestrator-requested agent?", `Agent: ${request.agentName}\nWait requested: ${request.waitForResponse ? "yes" : "no"}\n\n${request.message}`);
-							if (!ok) return;
-							await orchestratorStore.resolveStartRequest(sessionId, requestId, { status: "approved" });
-							await orchestratorStore.syncAllDrafts(settings);
-							const latestRequests = await orchestratorStore.listStartRequests(sessionId);
-							const latest = latestRequests.find((item) => item.id === requestId) ?? request;
-							const job = latest.agentJobId ? store.get(latest.agentJobId) : store.list().find((item) => item.name === request.agentName);
-							if (!job) {
+							const requestJobs = store.list().filter((job) => {
+								if (request.order !== undefined && job.source?.kind === "orchestrator" && job.source.sessionId === sessionId && job.source.order === request.order) return true;
+								if (request.agentJobIds?.includes(job.id)) return true;
+								return request.agentJobId === job.id;
+							});
+							const representative = requestJobs[0];
+							const requestGroup = request.order !== undefined && representative ? findGroupForJob(store.list(), representative) : undefined;
+							const job = requestGroup ? undefined : (request.agentJobId ? store.get(request.agentJobId) : store.list().find((item) => item.name === request.agentName));
+							const plan = requestGroup
+								? buildGroupStartPlan(requestGroup, (jobId) => runner.isRunning(jobId))
+								: job ? buildGroupStartPlan({ key: { sessionId, order: request.order ?? job.source?.order ?? 0 }, jobs: [job], label: job.name, isParallel: false }, (jobId) => runner.isRunning(jobId)) : undefined;
+							if (!plan) {
 								ctx.ui.notify(`No linked agent found for ${request.agentName}.`, "error");
 								return;
 							}
-							if (runner.isRunning(job.id) || job.startedAt || job.finalResponse || job.process || job.status !== "draft") {
-								ctx.ui.notify(`Agent ${job.name} has already started.`, "warning");
+							const ok = await ctx.ui.custom<boolean>(
+								(_dialogTui, dialogTheme, _dialogKeybindings, dialogDone) => new OrchestratorStartRequestDialog({ request, mode: "approve", job, plan, theme: dialogTheme, done: dialogDone }),
+								{
+									overlay: true,
+									overlayOptions: {
+										anchor: "center",
+										width: "90%",
+										minWidth: 62,
+										maxHeight: "82%",
+										margin: 2,
+									},
+								},
+							);
+							if (!ok) {
+								_tui.requestRender();
 								return;
 							}
-							await writeOrchestratorHandoffNote(job, store.list());
-							await orchestratorStore.markStartRequestStarted(sessionId, requestId, job.id);
-							await runner.start(job.id);
+							const latestJob = job ? store.get(job.id) : undefined;
+							const latestPlan = requestGroup
+								? buildGroupStartPlan(requestGroup, (jobId) => runner.isRunning(jobId))
+								: latestJob ? buildGroupStartPlan({ key: { sessionId, order: request.order ?? latestJob.source?.order ?? 0 }, jobs: [latestJob], label: latestJob.name, isParallel: false }, (jobId) => runner.isRunning(jobId)) : plan;
+							const targets = latestPlan.runnable;
+							if (targets.length === 0) {
+								ctx.ui.notify("No requested agents are currently runnable.", "warning");
+								_tui.requestRender();
+								return;
+							}
+							await orchestratorStore.resolveStartRequest(sessionId, requestId, { status: "approved" });
+							const startedIds: string[] = [];
+							for (const target of targets) {
+								const latest = store.get(target.id);
+								if (!latest) continue;
+								const recheck = buildGroupStartPlan({ key: { sessionId: latest.source?.sessionId ?? sessionId, order: latest.source?.order ?? request.order ?? 0 }, jobs: [latest], label: latest.name, isParallel: false }, (jobId) => runner.isRunning(jobId));
+								if (recheck.runnable.length === 0) continue;
+								if (latest.source?.kind === "orchestrator") await writeOrchestratorHandoffNote(latest, store.list());
+								await runner.start(latest.id);
+								startedIds.push(latest.id);
+							}
+							if (startedIds.length === 0) {
+								ctx.ui.notify("No requested agents could be started after re-checking state.", "warning");
+								_tui.requestRender();
+								return;
+							}
+							await orchestratorStore.markStartRequestStarted(sessionId, requestId, startedIds);
 							_tui.requestRender();
-						},
+						}, 
 						refreshOrchestratorState: async () => {
 							await orchestratorStore.refresh();
 							await orchestratorStore.syncAllDrafts(settings);
@@ -559,8 +602,23 @@ export default function desgracaAgentsExtension(pi: ExtensionAPI) {
 								ctx.ui.notify("Start request no longer exists.", "warning");
 								return;
 							}
-							const ok = await ctx.ui.confirm("Deny orchestrator start request?", `Agent: ${request.agentName}\n\n${request.message}`);
-							if (!ok) return;
+							const ok = await ctx.ui.custom<boolean>(
+								(_dialogTui, dialogTheme, _dialogKeybindings, dialogDone) => new OrchestratorStartRequestDialog({ request, mode: "deny", theme: dialogTheme, done: dialogDone }),
+								{
+									overlay: true,
+									overlayOptions: {
+										anchor: "center",
+										width: "86%",
+										minWidth: 58,
+										maxHeight: "70%",
+										margin: 2,
+									},
+								},
+							);
+							if (!ok) {
+								_tui.requestRender();
+								return;
+							}
 							await orchestratorStore.resolveStartRequest(sessionId, requestId, { status: "denied", denialReason: "Denied by user from ORCHESTRATOR mode." });
 							_tui.requestRender();
 						},

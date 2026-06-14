@@ -80,8 +80,10 @@ export function renderOrchestratorLeft(
 	lines.push(renderSectionTitle("Active", width, theme));
 	if (!session) lines.push(clampLine(fg(theme, "dim", "Select or create a session."), width));
 	else {
+		const pendingStarts = snapshot?.startRequests.filter((request) => request.status === "pending") ?? [];
 		lines.push(clampLine(`Title: ${session.title}`, width));
 		lines.push(clampLine(`Status: ${session.status}`, width));
+		if (pendingStarts.length > 0) lines.push(clampLine(fg(theme, "warning", `Action required: ${pendingStarts.length} pending start request${pendingStarts.length === 1 ? "" : "s"}`), width));
 		lines.push(clampLine(`Model: ${modelLabel(session)}`, width));
 		if (session.waitingFor) lines.push(clampLine(`Waiting: ${session.waitingFor.kind} ${session.waitingFor.agentName ?? session.waitingFor.requestId ?? ""}`, width));
 	}
@@ -127,20 +129,25 @@ function renderTranscriptEntry(entry: OrchestratorTranscriptEntry, width: number
 export function renderOrchestratorRight(snapshot: OrchestratorSessionSnapshot | undefined, width: number, theme?: Theme): string[] {
 	const lines: string[] = [renderSectionTitle("Orchestrator", width, theme)];
 	if (!snapshot) return [...lines, clampLine(fg(theme, "dim", "No active session."), width)];
+	const pending = snapshot.startRequests.filter((request) => request.status === "pending");
 	lines.push(clampLine(`Session: ${snapshot.session.title}`, width));
 	lines.push(clampLine(`Status: ${snapshot.session.status}  Updated: ${formatTime(snapshot.session.updatedAt)}`, width));
+	if (pending.length > 0) {
+		lines.push(clampLine(fg(theme, "warning", bold(theme, `ACTION REQUIRED: ${pending.length} pending orchestrator start request${pending.length === 1 ? "" : "s"}.`)), width));
+		lines.push(clampLine(fg(theme, "warning", "Press S/Enter to review and approve, or N to review and deny."), width));
+	}
 	if (snapshot.session.waitingFor) lines.push(clampLine(`Waiting: ${snapshot.session.waitingFor.kind} ${snapshot.session.waitingFor.agentName ?? snapshot.session.waitingFor.requestId ?? ""}`, width));
 	lines.push("");
 	lines.push(renderSectionTitle("Plan summary", width, theme));
 	const planLines = snapshot.plan.trim() ? snapshot.plan.split("\n").flatMap((line) => wrapWords(line, width)).slice(0, 4) : [fg(theme, "dim", "No plan yet.")];
 	lines.push(...planLines.map((line) => clampLine(line, width)));
 	lines.push("");
-	lines.push(renderSectionTitle("Pending starts", width, theme));
-	const pending = snapshot.startRequests.filter((request) => request.status === "pending");
+	lines.push(renderSectionTitle(pending.length > 0 ? "Pending starts - ACTION REQUIRED" : "Pending starts", width, theme));
 	if (pending.length === 0) lines.push(clampLine(fg(theme, "dim", "No pending start requests."), width));
 	else {
 		for (const request of pending) {
-			lines.push(clampLine(`${request.agentName} wait:${request.waitForResponse ? "yes" : "no"} created:${formatTime(request.createdAt)}`, width));
+			const target = request.kind === "order" || request.order !== undefined ? `order:${request.order ?? "?"} ${request.agentNames?.length ? `agents:${request.agentNames.length}` : ""}` : request.agentName;
+			lines.push(clampLine(fg(theme, "warning", `${target} wait:${request.waitForResponse ? "yes" : "no"} created:${formatTime(request.createdAt)}`), width));
 			lines.push(...wrapWords(request.message, Math.max(8, width - 2)).slice(0, 2).map((line) => clampLine(`  ${line}`, width)));
 		}
 	}

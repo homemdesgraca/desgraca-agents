@@ -33,7 +33,8 @@ export interface CreateOrUpdateDraftInput {
 }
 
 export interface CreateStartRequestInput {
-	name: string;
+	name?: string;
+	order?: number;
 	waitForResponse?: boolean;
 	message?: string;
 }
@@ -408,22 +409,56 @@ export class OrchestratorStore {
 	async createStartRequest(sessionId: string, input: CreateStartRequestInput): Promise<OrchestratorStartRequest> {
 		const session = this.sessions.get(sessionId);
 		if (!session) throw new Error(`Unknown orchestrator session: ${sessionId}`);
-		const name = sanitizeAgentName(input.name);
+		if (input.order !== undefined && input.name !== undefined) throw new Error("Provide either order or name, not both.");
+		if (input.order === undefined && input.name === undefined) throw new Error("Start request requires order or name.");
 		const drafts = await this.listDrafts(sessionId);
-		const draft = drafts.find((item) => sanitizeAgentName(item.name) === name);
-		const linkedJob = draft?.agentJobId ? this.agentStore.get(draft.agentJobId) : this.agentStore.list().find((job) => sanitizeAgentName(job.name) === name);
-		if (!draft && !linkedJob) throw new Error(`No draft or agent named ${name}.`);
-		const request: OrchestratorStartRequest = {
-			id: createId(),
-			sessionId,
-			draftId: draft?.id,
-			agentJobId: linkedJob?.id ?? draft?.agentJobId,
-			agentName: linkedJob?.name ?? draft?.name ?? name,
-			waitForResponse: !!input.waitForResponse,
-			status: "pending",
-			message: input.message ?? `Start agent ${linkedJob?.name ?? draft?.name ?? name}.`,
-			createdAt: now(),
-		};
+		let request: OrchestratorStartRequest;
+		if (input.order !== undefined) {
+			if (!Number.isFinite(input.order) || input.order <= 0) throw new Error("Worker order must be a positive number.");
+			const orderDrafts = drafts.filter((item) => item.order === input.order && item.status !== "discarded");
+			if (orderDrafts.length === 0) throw new Error(`No drafts found for order ${input.order}.`);
+			const jobs = orderDrafts.map((draft) => draft.agentJobId ? this.agentStore.get(draft.agentJobId) : undefined);
+			const agentNames = orderDrafts.map((draft, index) => jobs[index]?.name ?? draft.name);
+			const agentJobIds = jobs.flatMap((job) => job?.id ? [job.id] : []);
+			const label = orderDrafts.length === 1 ? agentNames[0]! : `order ${input.order} group (${orderDrafts.length} agents)`;
+			request = {
+				id: createId(),
+				sessionId,
+				kind: "order",
+				draftId: orderDrafts[0]?.id,
+				draftIds: orderDrafts.map((draft) => draft.id),
+				agentJobId: agentJobIds[0],
+				agentJobIds,
+				agentName: label,
+				agentNames,
+				order: input.order,
+				waitForResponse: !!input.waitForResponse,
+				status: "pending",
+				message: input.message ?? `Start ${label}.`,
+				createdAt: now(),
+			};
+		} else {
+			const name = sanitizeAgentName(input.name ?? "");
+			const draft = drafts.find((item) => sanitizeAgentName(item.name) === name);
+			const linkedJob = draft?.agentJobId ? this.agentStore.get(draft.agentJobId) : this.agentStore.list().find((job) => sanitizeAgentName(job.name) === name);
+			if (!draft && !linkedJob) throw new Error(`No draft or agent named ${name}.`);
+			request = {
+				id: createId(),
+				sessionId,
+				kind: "agent",
+				draftId: draft?.id,
+				draftIds: draft ? [draft.id] : undefined,
+				agentJobId: linkedJob?.id ?? draft?.agentJobId,
+				agentJobIds: linkedJob?.id ? [linkedJob.id] : draft?.agentJobId ? [draft.agentJobId] : [],
+				agentName: linkedJob?.name ?? draft?.name ?? name,
+				agentNames: [linkedJob?.name ?? draft?.name ?? name],
+				order: draft?.order ?? linkedJob?.source?.order,
+				waitForResponse: !!input.waitForResponse,
+				status: "pending",
+				message: input.message ?? `Start agent ${linkedJob?.name ?? draft?.name ?? name}.`,
+				createdAt: now(),
+			};
+		}
 		const requests = await this.listStartRequests(sessionId);
 		await this.saveStartRequests(sessionId, [...requests, request]);
 		await this.updateSession(sessionId, { status: "waiting_for_user", waitingFor: { kind: "start_request", requestId: request.id, agentJobId: request.agentJobId, agentName: request.agentName, since: now() } });
@@ -450,8 +485,9 @@ export class OrchestratorStore {
 		return resolved;
 	}
 
-	async markStartRequestStarted(sessionId: string, requestId: string, agentJobId: string): Promise<OrchestratorStartRequest | undefined> {
-		return this.patchStartRequest(sessionId, requestId, { status: "started", agentJobId, startedAt: now() });
+	async markStartRequestStarted(sessionId: string, requestId: string, agentJobId: string | string[]): Promise<OrchestratorStartRequest | undefined> {
+		const ids = Array.isArray(agentJobId) ? agentJobId : [agentJobId];
+		return this.patchStartRequest(sessionId, requestId, { status: "started", agentJobId: ids[0], agentJobIds: ids, startedAt: now() });
 	}
 
 	async patchStartRequest(sessionId: string, requestId: string, patch: Partial<OrchestratorStartRequest>): Promise<OrchestratorStartRequest | undefined> {
@@ -471,12 +507,16 @@ export class OrchestratorStore {
 			const requests = await this.listStartRequests(session.id);
 			let changed = false;
 			const next = requests.map((request) => {
-				if (!["approved", "started"].includes(request.status) || !request.agentJobId) return request;
-				const job = this.agentStore.get(request.agentJobId);
-				if (!job || !terminalAgentStatus(job.status)) return request;
-				const status: OrchestratorStartRequestStatus = job.status === "done" ? "done" : job.status === "failed" ? "failed" : "aborted";
+				if (!["approved", "started"].includes(request.status)) return request;
+				const ids = request.agentJobIds?.length ? request.agentJobIds : request.agentJobId ? [request.agentJobId] : [];
+				if (ids.length === 0) return request;
+				const jobs = ids.map((id) => this.agentStore.get(id)).filter((job): job is AgentJob => !!job);
+				if (jobs.length === 0 || jobs.some((job) => !terminalAgentStatus(job.status))) return request;
+				let status: OrchestratorStartRequestStatus = "done";
+				if (jobs.some((job) => job.status === "failed")) status = "failed";
+				else if (jobs.some((job) => job.status === "aborted")) status = "aborted";
 				changed = true;
-				return { ...request, status, finishedAt: now(), resultSummary: job.finalResponse ? taskSummary(job.finalResponse) : `Worker ended with status ${job.status}.` };
+				return { ...request, status, finishedAt: now(), resultSummary: this.formatStartRequestFinalResponses(jobs) };
 			});
 			if (changed) await this.saveStartRequests(session.id, next);
 		}
@@ -569,6 +609,13 @@ export class OrchestratorStore {
 			changed = true;
 		}
 		return { drafts: this.sortDrafts(next), changed };
+	}
+
+	private formatStartRequestFinalResponses(jobs: AgentJob[]): string {
+		return jobs.map((job) => {
+			const response = job.finalResponse?.trim() || `Worker ended with status ${job.status}.`;
+			return `${job.name}:\n${taskSummary(response)}`;
+		}).join("\n\n");
 	}
 
 	private resolveDraftModel(session: OrchestratorSession, settings: AgentExtensionSettings): AgentModelSelection | undefined {
