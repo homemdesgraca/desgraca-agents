@@ -25,6 +25,9 @@ export interface OrchestratorSession {
 	title: string;
 	cwd: string;
 	status: OrchestratorSessionStatus;
+	orchestratorId?: string;
+	orchestratorTitle?: string;
+	threadTitle?: string;
 	model?: AgentModelSelection;
 	activePlanPath: string;
 	createdAt: number;

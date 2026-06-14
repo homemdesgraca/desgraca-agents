@@ -113,6 +113,7 @@ describe("blank-slate MVP foundations", () => {
 	test("artifact discovery only reports files from the agent workspace", async () => {
 		const { createAgentJob } = await importCompiled("src/agents/agent-job.js");
 		const { AgentStore } = await importCompiled("src/agents/agent-store.js");
+		const { createArtifactSuggestion, applyArtifactSuggestion } = await importCompiled("src/agents/artifact-suggestions.js");
 		const { discoverArtifacts, PiSubprocessAgentRunner } = await importCompiled("src/agents/agent-runner.js");
 		const { createDefaultSettings } = await importCompiled("src/settings/settings.js");
 		const cwd = await fsp.mkdtemp(path.join(os.tmpdir(), "artifacts-"));
@@ -135,6 +136,14 @@ describe("blank-slate MVP foundations", () => {
 			assert.equal(artifacts[1].kind, "proposal");
 			assert.equal(artifacts[1].originalPath, path.join("nested", "notes.md"));
 			assert.equal(artifacts.some((artifact) => artifact.path.includes("agent-job.json")), false);
+			job.artifacts = artifacts;
+			const suggestion = await createArtifactSuggestion(job, { artifactPath: path.join("nested", "notes.md"), content: "suggested content", orchestratorSessionId: "session-1", orchestratorTitle: "Planner", summary: "tighten proposal" });
+			const withSuggestions = await discoverArtifacts(job);
+			assert.equal(withSuggestions.some((artifact) => artifact.path.includes("artifact-suggestions")), false);
+			assert.equal(withSuggestions.find((artifact) => artifact.path === artifacts[1].path).suggestions[0].summary, "tighten proposal");
+			job.artifacts = withSuggestions;
+			assert.match(await applyArtifactSuggestion(job, suggestion), /main project was not modified/);
+			assert.equal(await fsp.readFile(path.join(job.writableRoot, "proposals", "nested", "notes.md"), "utf8"), "suggested content");
 
 			const store = new AgentStore();
 			const liveJob = store.create(cwd, "live artifacts", "watch files");
@@ -182,6 +191,7 @@ describe("blank-slate MVP foundations", () => {
 				updatedAt: Date.now(),
 				kind: "proposal",
 				originalPath: "notes.md",
+				suggestions: [{ id: "suggestion-1", artifactPath: path.join(".agents", job.name, "proposals", "notes.md"), path: path.join(".agents", job.name, "artifact-suggestions", "notes.suggestion"), absolutePath: artifactPath, sizeBytes: 17, updatedAt: Date.now(), createdAt: Date.now(), orchestratorSessionId: "session-1", orchestratorTitle: "Planner", summary: "review suggestion" }],
 			});
 			job.artifacts.push({
 				id: "artifact-2",
@@ -195,6 +205,8 @@ describe("blank-slate MVP foundations", () => {
 			assert.match(renderJobList([job], job.id, 100).join("\n"), /approvals:1/);
 			assert.match(renderApprovals(job, 100).join("\n"), /Warning: rm detected/);
 			assert.match(renderArtifacts(job, 100).join("\n"), /original: notes\.md/);
+			assert.match(renderArtifacts(job, 100).join("\n"), /suggestion.*review suggestion/);
+			assert.match(renderArtifacts(job, 100).join("\n"), /Enter artifact, then S/);
 			assert.match(renderArtifacts(job, 100).join("\n"), /notes.*handoff\.md/);
 			assert.doesNotMatch(renderArtifacts(job, 100, undefined, 0, { showNotes: false }).join("\n"), /handoff\.md/);
 			assert.match(renderArtifactContent(job.artifacts[0], 100).join("\n"), /line two/);
@@ -225,8 +237,9 @@ describe("blank-slate MVP foundations", () => {
 			assert.match(renderFooterHints(120, undefined, "artifacts").join("\n"), /V.*notes/);
 			assert.doesNotMatch(renderFooterHints(120, undefined, "normal").join("\n"), /approve|deny/);
 			assert.match(renderFooterHints(120, undefined, "normal").join("\n"), /K clear/);
-			assert.match(renderFooterHints(120, undefined, "logs").join("\n"), /L.*auto-scroll/);
-			assert.match(renderFooterHints(120, undefined, "logs").join("\n"), /PgUp\/PgDn.*top\/bottom/);
+			assert.doesNotMatch(renderFooterHints(120, undefined, "logs").join("\n"), /L.*auto-scroll/);
+			assert.doesNotMatch(renderFooterHints(120, undefined, "logs").join("\n"), /PgUp\/PgDn.*top\/bottom/);
+			assert.doesNotMatch(renderFooterHints(120, undefined, "orchestrator").join("\n"), /PgUp\/PgDn.*top\/bottom/);
 			assert.match(renderFooterHints(120, undefined, "approvals").join("\n"), /approve/);
 		} finally {
 			await fsp.rm(cwd, { recursive: true, force: true });

@@ -56,12 +56,22 @@ export function renderOrchestratorLeft(
 	width: number,
 	theme?: Theme,
 ): string[] {
-	const lines: string[] = [renderSectionTitle("Orchestrator sessions", width, theme)];
-	if (sessions.length === 0) lines.push(clampLine(fg(theme, "dim", "No sessions. Press C to create one."), width));
+	const lines: string[] = [renderSectionTitle("Orchestrator threads", width, theme)];
+	if (sessions.length === 0) lines.push(clampLine(fg(theme, "dim", "No orchestrators. Press C to create one."), width));
 	else {
+		const selectedSession = sessions.find((session) => session.id === selectedSessionId);
+		let lastOrchestratorId = "";
 		for (const [index, session] of sessions.slice(0, 9).entries()) {
+			const orchestratorId = session.orchestratorId ?? session.id;
+			if (orchestratorId !== lastOrchestratorId) {
+				const title = session.orchestratorTitle ?? session.title;
+				const selectedGroup = (selectedSession?.orchestratorId ?? selectedSession?.id) === orchestratorId;
+				lines.push(clampLine(fg(theme, selectedGroup ? "accent" : "toolTitle", title), width));
+				lastOrchestratorId = orchestratorId;
+			}
 			const selected = session.id === selectedSessionId;
-			const row = `${selected ? ">" : " "} ${index + 1}. ${session.title} [${session.status}]`;
+			const thread = session.threadTitle ?? (session.orchestratorId === session.id ? "Main" : session.title);
+			const row = `${selected ? ">" : " "} ${index + 1}. ${thread} [${session.status}]`;
 			lines.push(selected ? bg(theme, "selectedBg", padLine(row, width)) : clampLine(fg(theme, selected ? "text" : "muted", row), width));
 		}
 	}

@@ -20,6 +20,12 @@ export interface CreateOrchestratorSessionInput {
 	initialPlan?: string;
 }
 
+export interface CreateOrchestratorThreadInput {
+	title: string;
+	model?: AgentModelSelection;
+	initialPlan?: string;
+}
+
 export interface CreateOrUpdateDraftInput {
 	name: string;
 	task: string;
@@ -156,12 +162,51 @@ export class OrchestratorStore {
 		const id = createId();
 		const sessionDir = this.sessionDir(resolvedCwd, id);
 		const timestamp = now();
+		const title = normalizeTitle(input.title);
 		const session: OrchestratorSession = {
 			id,
-			title: normalizeTitle(input.title),
+			title,
 			cwd: resolvedCwd,
 			status: "idle",
+			orchestratorId: id,
+			orchestratorTitle: title,
+			threadTitle: "Main",
 			model: input.model,
+			activePlanPath: path.join(sessionDir, PLAN_FILE),
+			createdAt: timestamp,
+			updatedAt: timestamp,
+		};
+		await ensureDir(path.join(sessionDir, "notes"));
+		await writeJsonFileAtomic(path.join(sessionDir, SESSION_FILE), session);
+		await writeTextFileAtomic(path.join(sessionDir, PLAN_FILE), input.initialPlan ?? "");
+		await writeJsonFileAtomic(path.join(sessionDir, DRAFTS_FILE), []);
+		await writeJsonFileAtomic(path.join(sessionDir, START_REQUESTS_FILE), []);
+		this.sessions.set(id, session);
+		this.selectedSessionId = id;
+		this.notify();
+		return session;
+	}
+
+	async createThread(parentSessionId: string, input: CreateOrchestratorThreadInput): Promise<OrchestratorSession> {
+		const parent = this.sessions.get(parentSessionId);
+		if (!parent) throw new Error(`Unknown orchestrator session: ${parentSessionId}`);
+		const orchestratorId = parent.orchestratorId ?? parent.id;
+		const orchestratorTitle = parent.orchestratorTitle ?? parent.title;
+		const threadTitle = normalizeTitle(input.title);
+		const resolvedCwd = path.resolve(parent.cwd);
+		this.cwd = resolvedCwd;
+		const id = createId();
+		const sessionDir = this.sessionDir(resolvedCwd, id);
+		const timestamp = now();
+		const session: OrchestratorSession = {
+			id,
+			title: `${orchestratorTitle}: ${threadTitle}`,
+			cwd: resolvedCwd,
+			status: "idle",
+			orchestratorId,
+			orchestratorTitle,
+			threadTitle,
+			model: input.model ?? parent.model,
 			activePlanPath: path.join(sessionDir, PLAN_FILE),
 			createdAt: timestamp,
 			updatedAt: timestamp,
@@ -562,8 +607,13 @@ export class OrchestratorStore {
 
 	private normalizeSession(session: OrchestratorSession): OrchestratorSession {
 		const timestamp = now();
+		const orchestratorId = session.orchestratorId ?? session.id;
+		const orchestratorTitle = session.orchestratorTitle ?? session.title;
 		return {
 			...session,
+			orchestratorId,
+			orchestratorTitle,
+			threadTitle: session.threadTitle ?? (orchestratorId === session.id ? "Main" : session.title),
 			status: session.status === "running" ? "idle" : session.status || "idle",
 			activePlanPath: session.activePlanPath || path.join(this.sessionDir(session.cwd, session.id), PLAN_FILE),
 			createdAt: session.createdAt ?? timestamp,

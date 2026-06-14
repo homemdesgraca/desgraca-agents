@@ -7,6 +7,7 @@ import type { AgentArtifact, AgentJob } from "./agent-job.ts";
 import { createId } from "./agent-job.ts";
 import type { AgentStore } from "./agent-store.ts";
 import type { AgentExtensionSettings } from "../settings/settings.ts";
+import { listArtifactSuggestions } from "./artifact-suggestions.ts";
 
 export interface AgentRunner {
 	start(jobId: string): Promise<void>;
@@ -57,8 +58,10 @@ async function walkFiles(root: string, cwd: string, agentId: string): Promise<Ag
 			return;
 		}
 		for (const entry of entries) {
-			if (entry.name === "agent-job.json" || (entry.name.startsWith("agent-job.json.") && entry.name.endsWith(".tmp"))) continue;
+			if (entry.name === "agent-job.json" || entry.name === "artifact-suggestions.json" || (entry.name.startsWith("agent-job.json.") && entry.name.endsWith(".tmp"))) continue;
 			const absolutePath = path.join(current, entry.name);
+			const relativeToWorkspace = path.relative(root, absolutePath);
+			if (relativeToWorkspace === "artifact-suggestions" || relativeToWorkspace.startsWith(`artifact-suggestions${path.sep}`)) continue;
 			if (entry.isDirectory()) {
 				await walk(absolutePath);
 				continue;
@@ -71,7 +74,6 @@ async function walkFiles(root: string, cwd: string, agentId: string): Promise<Ag
 				if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
 				throw error;
 			}
-			const relativeToWorkspace = path.relative(root, absolutePath);
 			const isProposal = relativeToWorkspace === "proposals" || relativeToWorkspace.startsWith(`proposals${path.sep}`);
 			const isNote = relativeToWorkspace === "notes" || relativeToWorkspace.startsWith(`notes${path.sep}`);
 			const originalPath = isProposal ? path.relative("proposals", relativeToWorkspace) : undefined;
@@ -93,7 +95,11 @@ async function walkFiles(root: string, cwd: string, agentId: string): Promise<Ag
 
 export async function discoverArtifacts(job: AgentJob): Promise<AgentArtifact[]> {
 	await ensureDirectory(job.writableRoot);
-	return walkFiles(job.writableRoot, job.readableRoot, job.id);
+	const [artifacts, suggestions] = await Promise.all([
+		walkFiles(job.writableRoot, job.readableRoot, job.id),
+		listArtifactSuggestions(job.writableRoot),
+	]);
+	return artifacts.map((artifact) => ({ ...artifact, suggestions: suggestions.filter((suggestion) => suggestion.artifactPath === artifact.path) }));
 }
 
 export class PiSubprocessAgentRunner implements AgentRunner {

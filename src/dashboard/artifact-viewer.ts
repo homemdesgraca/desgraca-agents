@@ -6,7 +6,7 @@ import type { AgentArtifact, AgentJob } from "../agents/agent-job.ts";
 import { isPathInside } from "../permissions/scope-guard.ts";
 import { clampLine, padLine, wrapPlainLine } from "./render.ts";
 
-type ViewerMode = "diff" | "proposal" | "original";
+type ViewerMode = "diff" | "proposal" | "original" | "suggestion";
 type LineKind = "header" | "added" | "removed" | "context" | "raw" | "error" | "muted";
 
 interface ViewerLine {
@@ -26,6 +26,7 @@ export interface ArtifactViewerOptions {
 	viewportRows?: number;
 	onClose(): void;
 	onAccept?(job: AgentJob, artifact: AgentArtifact): Promise<string>;
+	onAcceptSuggestion?(job: AgentJob, artifact: AgentArtifact, suggestionId: string): Promise<string>;
 	requestRender?(): void;
 }
 
@@ -121,6 +122,8 @@ export class ArtifactViewer implements Component {
 	private awaitingAcceptConfirm = false;
 	private accepting = false;
 	private proposalRead: ReturnType<typeof readTextFile>;
+	private suggestionIndex = 0;
+	private suggestionRead: ReturnType<typeof readTextFile> | undefined;
 	private originalRead: ReturnType<typeof readTextFile> | undefined;
 	private cachedWidth: number | undefined;
 	private cachedLines: string[] | undefined;
@@ -131,6 +134,7 @@ export class ArtifactViewer implements Component {
 	constructor(private readonly options: ArtifactViewerOptions) {
 		this.mode = options.artifact.kind === "proposal" && options.artifact.originalPath ? "diff" : "proposal";
 		this.proposalRead = readTextFile(options.artifact.absolutePath);
+		this.refreshSuggestionRead();
 		this.refreshOriginalRead();
 		if (this.mode === "diff") this.pendingFirstChangeScroll = true;
 	}
@@ -159,6 +163,7 @@ export class ArtifactViewer implements Component {
 		else if (data === "d" || data === "D") this.setMode("diff");
 		else if (data === "p" || data === "P") this.setMode("proposal");
 		else if (data === "o" || data === "O") this.setMode("original");
+		else if (data === "s" || data === "S") this.setMode("suggestion");
 		else if (data === "a" || data === "A") {
 			void this.acceptArtifact();
 		}
@@ -183,6 +188,11 @@ export class ArtifactViewer implements Component {
 			this.rerender();
 			return;
 		}
+		if (mode === "suggestion" && !this.currentSuggestion()) {
+			this.notice = "No orchestrator suggestions are attached to this artifact.";
+			this.rerender();
+			return;
+		}
 		this.mode = mode;
 		this.notice = undefined;
 		this.awaitingAcceptConfirm = false;
@@ -196,6 +206,7 @@ export class ArtifactViewer implements Component {
 	}
 
 	private canAccept(): boolean {
+		if (this.mode === "suggestion") return !!this.currentSuggestion() && !!this.options.onAcceptSuggestion;
 		return this.options.artifact.kind === "proposal" && !!this.options.artifact.originalPath && !!this.options.onAccept;
 	}
 
@@ -204,28 +215,44 @@ export class ArtifactViewer implements Component {
 		this.originalRead = originalPath ? readTextFile(originalPath) : undefined;
 	}
 
+	private currentSuggestion() {
+		return this.options.artifact.suggestions?.[this.suggestionIndex];
+	}
+
+	private refreshSuggestionRead(): void {
+		const suggestion = this.currentSuggestion();
+		this.suggestionRead = suggestion ? readTextFile(suggestion.absolutePath) : undefined;
+	}
+
 	private async acceptArtifact(): Promise<void> {
 		if (!this.canAccept()) {
 			this.awaitingAcceptConfirm = false;
-			this.notice = "Accept is available only for proposal artifacts with an original path.";
+			this.notice = this.mode === "suggestion" ? "Accept is available only when a suggestion is selected." : "Accept is available only for proposal artifacts with an original path.";
 			this.rerender();
 			return;
 		}
+		const suggestion = this.currentSuggestion();
 		if (this.accepting) return;
 		if (!this.awaitingAcceptConfirm) {
 			this.awaitingAcceptConfirm = true;
-			this.notice = `Press A again to accept this proposal into ${this.options.artifact.originalPath}.`;
+			this.notice = this.mode === "suggestion" && suggestion ? `Press A again to fuse this suggestion into ${this.options.artifact.path}.` : `Press A again to accept this proposal into ${this.options.artifact.originalPath}.`;
 			this.rerender();
 			return;
 		}
 		this.accepting = true;
-		this.notice = "Accepting proposal...";
+		this.notice = this.mode === "suggestion" ? "Applying suggestion..." : "Accepting proposal...";
 		this.rerender();
 		try {
-			const message = await this.options.onAccept!(this.options.job, this.options.artifact);
+			const acceptingSuggestion = this.mode === "suggestion" && suggestion;
+			const message = acceptingSuggestion
+				? await this.options.onAcceptSuggestion!(this.options.job, this.options.artifact, suggestion.id)
+				: await this.options.onAccept!(this.options.job, this.options.artifact);
+			if (acceptingSuggestion) this.options.artifact.suggestions = (this.options.artifact.suggestions ?? []).filter((item) => item.id !== suggestion.id);
+			this.suggestionIndex = Math.min(this.suggestionIndex, Math.max(0, (this.options.artifact.suggestions?.length ?? 1) - 1));
 			this.proposalRead = readTextFile(this.options.artifact.absolutePath);
+			this.refreshSuggestionRead();
 			this.refreshOriginalRead();
-			this.mode = this.options.artifact.kind === "proposal" && this.options.artifact.originalPath ? "diff" : this.mode;
+			this.mode = this.options.artifact.kind === "proposal" && this.options.artifact.originalPath ? "diff" : acceptingSuggestion ? "proposal" : this.mode;
 			this.scrollOffset = 0;
 			this.pendingFirstChangeScroll = this.mode === "diff";
 			this.notice = message;
@@ -313,7 +340,8 @@ export class ArtifactViewer implements Component {
 	private headerLine(width: number): string {
 		const theme = this.options.theme;
 		const mode = fg(theme, "accent", bold(theme, this.mode.toUpperCase()));
-		return padLine(`${fg(theme, "dim", "agent:")} ${fg(theme, "text", this.options.job.name)}  ${fg(theme, "dim", "mode:")} ${mode}  ${fg(theme, "dim", "wrap:")} ${this.wrap ? "on" : "off"}`, width);
+		const suggestions = this.options.artifact.suggestions?.length ? `  ${fg(theme, "dim", "suggestions:")} ${this.options.artifact.suggestions.length}` : "";
+		return padLine(`${fg(theme, "dim", "agent:")} ${fg(theme, "text", this.options.job.name)}  ${fg(theme, "dim", "mode:")} ${mode}  ${fg(theme, "dim", "wrap:")} ${this.wrap ? "on" : "off"}${suggestions}`, width);
 	}
 
 	private artifactPathLine(width: number): string {
@@ -330,9 +358,10 @@ export class ArtifactViewer implements Component {
 	private footer(width: number): string {
 		const theme = this.options.theme;
 		const key = (value: string) => fg(theme, "accent", bold(theme, value));
+		const suggestionHint = this.options.artifact.suggestions?.length ? `  ${key("S")} suggestion` : "";
 		const hints = this.options.artifact.kind === "proposal"
-			? `${key("Up/Down")} scroll  ${key("PgUp/PgDn")} changes/page  ${key("A")} accept  ${key("D")} diff  ${key("P")} proposal  ${key("O")} original  ${key("W")} wrap  ${key("Q/Esc")} close`
-			: `${key("Up/Down")} scroll  ${key("PgUp/PgDn")} page  ${key("P")} raw  ${key("W")} wrap  ${key("Q/Esc")} close`;
+			? `${key("Up/Down")} scroll  ${key("PgUp/PgDn")} changes/page  ${key("A")} accept  ${key("D")} diff  ${key("P")} proposal  ${key("O")} original${suggestionHint}  ${key("W")} wrap  ${key("Q/Esc")} close`
+			: `${key("Up/Down")} scroll  ${key("PgUp/PgDn")} page  ${key("P")} raw${suggestionHint}  ${key("W")} wrap  ${key("Q/Esc")} close`;
 		return padLine(hints, width);
 	}
 
@@ -352,6 +381,11 @@ export class ArtifactViewer implements Component {
 				return [{ kind: "error", text: "Diff view requires a readable proposal artifact and original path." }];
 			}
 			return buildLineDiff(this.originalRead.ok ? this.originalRead.content : "", this.proposalRead.content);
+		}
+		if (this.mode === "suggestion") {
+			if (!this.suggestionRead) return [{ kind: "error", text: "No suggestion selected." }];
+			if (!this.suggestionRead.ok) return [{ kind: "error", text: `Could not read suggestion: ${this.suggestionRead.error}` }];
+			return buildLineDiff(this.proposalRead.ok ? this.proposalRead.content : "", this.suggestionRead.content);
 		}
 		if (!this.proposalRead.ok) return [{ kind: "error", text: `Could not read artifact: ${this.proposalRead.error}` }];
 		return this.rawLines(this.proposalRead.content);
