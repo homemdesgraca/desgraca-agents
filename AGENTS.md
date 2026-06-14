@@ -50,8 +50,8 @@ Safe defaults:
 
 - allow simple read and search tools,
 - allow agent-only proposal, artifact, and note tools,
-- ask for `bash`,
-- do not expose generic built-in `write` and `edit` to worker agents.
+- ask for worker shell commands by default through the isolated `agent_bash` tool,
+- do not expose generic built-in `bash`, `write`, and `edit` to worker agents.
 
 If generic file mutation tools are ever exposed by configuration, scope guards must restrict them to the worker writable root.
 
@@ -127,6 +127,7 @@ Workers must not edit project files directly. When a worker needs to suggest a p
 
 Current agent-only tools include:
 
+- `agent_bash`,
 - `agent_write_proposal`,
 - `agent_edit_proposal`,
 - `agent_view_artifacts`,
