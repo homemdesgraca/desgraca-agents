@@ -1,105 +1,12 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { after, before, describe, test } from "node:test";
-import { pathToFileURL } from "node:url";
+import { describe, test } from "node:test";
+import { setupCompiledProject } from "./helpers/test-utils.mjs";
 
-const projectRoot = path.resolve(import.meta.dirname, "..");
-const piNodeModules = "/usr/lib/node_modules/pi/node_modules";
-const compiledRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "desgraca-agents-tests-"));
-const sourceNodeModules = path.join(projectRoot, "node_modules");
-const sourceEarendil = path.join(sourceNodeModules, "@earendil-works");
-const sourceTypebox = path.join(sourceNodeModules, "typebox");
-let hadSourceEarendil = false;
-let hadSourceTypebox = false;
-let hadSourceNodeModules = false;
-
-async function ensurePiNodeModulesLink(root) {
-	const target = path.join(root, "node_modules");
-	await fsp.mkdir(target, { recursive: true });
-	const link = path.join(target, "@earendil-works");
-	try {
-		await fsp.lstat(link);
-		await fsp.rm(link, { recursive: true, force: true });
-	} catch {}
-	await fsp.symlink(path.join(piNodeModules, "@earendil-works"), link, "dir");
-	const typeboxLink = path.join(target, "typebox");
-	try {
-		await fsp.lstat(typeboxLink);
-		await fsp.rm(typeboxLink, { recursive: true, force: true });
-	} catch {}
-	await fsp.symlink(path.join(piNodeModules, "typebox"), typeboxLink, "dir");
-}
-
-async function importCompiled(relativePath) {
-	return import(pathToFileURL(path.join(compiledRoot, relativePath)).href);
-}
-
-before(async () => {
-	hadSourceNodeModules = fs.existsSync(sourceNodeModules);
-	hadSourceEarendil = fs.existsSync(sourceEarendil);
-	hadSourceTypebox = fs.existsSync(sourceTypebox);
-	if (!hadSourceEarendil) {
-		await fsp.mkdir(sourceNodeModules, { recursive: true });
-		await fsp.symlink(path.join(piNodeModules, "@earendil-works"), sourceEarendil, "dir");
-	}
-	if (!hadSourceTypebox) {
-		await fsp.mkdir(sourceNodeModules, { recursive: true });
-		await fsp.symlink(path.join(piNodeModules, "typebox"), sourceTypebox, "dir");
-	}
-
-	execFileSync(
-		"tsc",
-		[
-			"--target",
-			"ES2022",
-			"--module",
-			"ES2022",
-			"--moduleResolution",
-			"Bundler",
-			"--allowImportingTsExtensions",
-			"--rewriteRelativeImportExtensions",
-			"--skipLibCheck",
-			"--esModuleInterop",
-			"--outDir",
-			compiledRoot,
-			"--rootDir",
-			projectRoot,
-			"index.ts",
-			"src/agents/agent-env.ts",
-			"src/agents/agent-job.ts",
-			"src/agents/agent-runner.ts",
-			"src/agents/agent-store.ts",
-			"src/agents/proposal-tools.ts",
-			"src/dashboard/artifact-viewer.ts",
-			"src/dashboard/clear-agent-dialog.ts",
-			"src/dashboard/Dashboard.ts",
-			"src/dashboard/keybindings.ts",
-			"src/dashboard/render.ts",
-			"src/permissions/policies.ts",
-			"src/permissions/risk-warnings.ts",
-			"src/permissions/scope-guard.ts",
-			"src/settings/settings.ts",
-		],
-		{ cwd: projectRoot, stdio: "pipe" },
-	);
-	await fsp.writeFile(path.join(compiledRoot, "package.json"), JSON.stringify({ type: "module" }));
-	await ensurePiNodeModulesLink(compiledRoot);
-});
-
-after(async () => {
-	delete process.env.DESGRACA_AGENT_JOB_ID;
-	delete process.env.DESGRACA_AGENT_NAME;
-	delete process.env.DESGRACA_AGENT_WRITABLE_ROOT;
-	delete process.env.DESGRACA_AGENT_SETTINGS;
-	if (!hadSourceEarendil) await fsp.rm(sourceEarendil, { recursive: true, force: true });
-	if (!hadSourceTypebox) await fsp.rm(sourceTypebox, { recursive: true, force: true });
-	if (!hadSourceNodeModules) await fsp.rm(sourceNodeModules, { recursive: true, force: true });
-	await fsp.rm(compiledRoot, { recursive: true, force: true });
-});
+const { projectRoot, importCompiled } = setupCompiledProject();
 
 describe("blank-slate MVP foundations", () => {
 	test("default policies allow read/search/agent-only tools and do not expose write/edit", async () => {
@@ -290,7 +197,6 @@ describe("blank-slate MVP foundations", () => {
 			assert.deepEqual(parseDashboardAction("3"), { type: "select", index: 2 });
 			assert.deepEqual(parseDashboardAction("["), { type: "artifactPrevious" });
 			assert.deepEqual(parseDashboardAction("]"), { type: "artifactNext" });
-			assert.deepEqual(parseDashboardAction("O"), { type: "artifactOpen" });
 			assert.deepEqual(parseDashboardAction("\r"), { type: "artifactOpen" });
 			assert.deepEqual(parseDashboardAction("V"), { type: "toggleNotes" });
 			assert.doesNotMatch(renderFooterHints(120, undefined, "artifacts").join("\n"), /approve|deny/);
@@ -598,4 +504,5 @@ describe("blank-slate MVP foundations", () => {
 			await fsp.rm(cwd, { recursive: true, force: true });
 		}
 	});
+
 });

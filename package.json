@@ -1,0 +1,25 @@
+{
+  "name": "desgraca-agents",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "pi extension for supervised isolated worker agents and orchestrator sessions.",
+  "main": "./index.ts",
+  "types": "./index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "^0.79.3",
+    "@earendil-works/pi-tui": "^0.79.3",
+    "typebox": "1.1.38"
+  },
+  "devDependencies": {
+    "@types/node": "^24.12.4",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}

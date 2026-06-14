@@ -7,6 +7,7 @@ It is built around user control. Workers can read the current project, but their
 ## What it provides
 
 - A full `/agents` dashboard for creating, starting, aborting, clearing, deleting, and inspecting agent jobs.
+- An ORCHESTRATOR mode for persistent planning sessions that draft ordered workers and request user-approved starts.
 - Isolated worker workspaces under `.agents/{AGENT_NAME}`.
 - Proposal-based code changes that are reviewed before being applied.
 - Agent notes for plans, findings, and handoff details.
@@ -15,7 +16,7 @@ It is built around user control. Workers can read the current project, but their
 ## Commands
 
 - `/agents`: Open the agent dashboard. Requires TUI mode.
-- `/agent-settings`: Open agent-scoped permission policy settings.
+- `/agent-settings`: Open worker/orchestrator permission policy settings and default model settings.
 - `/agent-policy-cycle <tool>`: Cycle one agent tool policy between `allow`, `ask`, and `deny`.
 
 ## Dashboard keys
@@ -23,6 +24,7 @@ It is built around user control. Workers can read the current project, but their
 ### Modes
 
 - `G`: AGENTS mode.
+- `O`: ORCHESTRATOR mode.
 - `T`: TRACKING mode.
 - `P`: APPROVALS mode.
 - `F`: ARTIFACTS mode.
@@ -35,11 +37,24 @@ It is built around user control. Workers can read the current project, but their
 In AGENTS mode:
 
 - `C`: Create a job.
+- `I`: Edit a draft job's name, task, and model.
 - `S`: Start the selected job.
 - `X`: Abort the selected running job.
 - `K`: Clear selected-agent output after confirmation.
 - `Delete` or `Backspace`: Delete the selected job after confirmation.
 - `1`-`9`: Select an agent job.
+
+### Orchestrator
+
+In ORCHESTRATOR mode:
+
+- `C`: Create an orchestrator session with a title, optional initial prompt, and model picker.
+- `M`: Send a message to the active orchestrator session.
+- `1`-`9`: Select an orchestrator session.
+- `A` or `Enter`: Approve a pending orchestrator start request through confirmation.
+- `N`: Deny a pending orchestrator start request through confirmation.
+
+The orchestrator can create ordered worker drafts with only worker name, task, and order. Those drafts appear as normal draft jobs in AGENTS mode, where the user can edit model/task/name before starting.
 
 ### Tracking and approvals
 
@@ -53,7 +68,7 @@ In AGENTS mode:
 In ARTIFACTS mode:
 
 - `[` / `]`: Move between visible artifacts and notes.
-- `O` or `Enter`: Open the selected artifact.
+- `Enter`: Open the selected artifact.
 - `V`: Hide or show note artifacts.
 - `R`: Refresh artifact discovery.
 
@@ -85,14 +100,21 @@ Generated work is not applied automatically. A proposal is written back to the p
 
 ## Permissions
 
-Permission policies are agent-scoped only. This extension does not intercept normal tool calls in the parent pi session.
+Permission policies are scoped to worker and orchestrator subprocesses only. This extension does not intercept normal tool calls in the parent pi session.
 
-Default behavior:
+Default worker behavior:
 
 - Read and search tools are allowed for workers.
 - Agent-only proposal, artifact, and note tools are allowed.
 - `bash` defaults to `ask`.
 - Generic built-in `write` and `edit` are not exposed to worker agents.
+
+Default orchestrator behavior:
+
+- Read/search, notes, plan updates, draft creation, status/detail tools, and start-request tools are allowed.
+- `bash` defaults to `deny`.
+- Generic `write`/`edit`, worker proposal tools, and artifact acceptance are unavailable.
+- Agent starts requested by the orchestrator require explicit user confirmation.
 
 Simple warnings are shown for risky bash patterns such as `rm`, `curl`, `wget`, `sudo`, `chmod`, `chown`, `kill`, and shell redirection.
 

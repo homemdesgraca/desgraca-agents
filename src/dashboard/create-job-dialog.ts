@@ -9,6 +9,14 @@ export interface CreateJobDialogResult {
 	model?: AgentModelSelection;
 }
 
+export interface CreateJobDialogInitialValue {
+	name?: string;
+	task?: string;
+	model?: AgentModelSelection;
+	title?: string;
+	description?: string;
+}
+
 type ActiveField = "name" | "model" | "task";
 
 export class CreateJobDialog implements Component, Focusable {
@@ -24,6 +32,7 @@ export class CreateJobDialog implements Component, Focusable {
 		private readonly theme: Theme,
 		private readonly done: (result: CreateJobDialogResult | undefined) => void,
 		private readonly modelOptions: AgentModelSelection[] = [],
+		private readonly initial: CreateJobDialogInitialValue = {},
 	) {
 		this.taskEditor = new Editor(
 			tui,
@@ -33,6 +42,12 @@ export class CreateJobDialog implements Component, Focusable {
 			},
 			{ paddingX: 0 },
 		);
+		if (initial.name) this.nameInput.setValue(initial.name);
+		if (initial.task) this.taskEditor.setText(initial.task);
+		if (initial.model) {
+			const index = modelOptions.findIndex((model) => model.provider === initial.model?.provider && model.id === initial.model?.id);
+			if (index >= 0) this.selectedModelIndex = index;
+		}
 		this.nameInput.onSubmit = () => this.focusNext();
 		this.taskEditor.onSubmit = (task) => this.submit(task);
 		this.syncFocus();
@@ -71,9 +86,9 @@ export class CreateJobDialog implements Component, Focusable {
 		const safeWidth = Math.max(40, width);
 		const innerWidth = Math.max(1, safeWidth - 2);
 		const inputWidth = Math.max(8, innerWidth - 8);
-		const output: string[] = [renderTopBorder(safeWidth, " Create agent job ", this.theme)];
+		const output: string[] = [renderTopBorder(safeWidth, this.initial.title ?? " Create agent job ", this.theme)];
 
-		output.push(renderBoxedLine(this.theme.fg("muted", "Create a narrow, isolated worker. Fields start empty; Esc or Ctrl+C cancels."), safeWidth, this.theme));
+		output.push(renderBoxedLine(this.theme.fg("muted", this.initial.description ?? "Create a narrow, isolated worker. Fields start empty; Esc or Ctrl+C cancels."), safeWidth, this.theme));
 		if (this.errorMessage) output.push(renderBoxedLine(this.theme.fg("warning", this.errorMessage), safeWidth, this.theme));
 		output.push(renderDivider(safeWidth, this.theme));
 

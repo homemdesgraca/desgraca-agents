@@ -8,27 +8,25 @@ import type { AgentArtifact, AgentJob, AgentModelSelection } from "./src/agents/
 import { AgentStore } from "./src/agents/agent-store.ts";
 import { PiSubprocessAgentRunner } from "./src/agents/agent-runner.ts";
 import { registerAgentProposalTools } from "./src/agents/proposal-tools.ts";
+import { getOrchestratorProcessEnvContext } from "./src/orchestrator/orchestrator-env.ts";
+import { PiSubprocessOrchestratorRunner } from "./src/orchestrator/orchestrator-runner.ts";
+import { OrchestratorStore } from "./src/orchestrator/orchestrator-store.ts";
+import { registerOrchestratorTools } from "./src/orchestrator/orchestrator-tools.ts";
 import { ArtifactViewer } from "./src/dashboard/artifact-viewer.ts";
 import { ClearAgentDialog } from "./src/dashboard/clear-agent-dialog.ts";
 import { CreateJobDialog, type CreateJobDialogResult } from "./src/dashboard/create-job-dialog.ts";
+import { CreateOrchestratorSessionDialog, type CreateOrchestratorSessionDialogResult } from "./src/dashboard/create-orchestrator-session-dialog.ts";
 import { Dashboard } from "./src/dashboard/Dashboard.ts";
 import { DeleteAgentDialog } from "./src/dashboard/delete-agent-dialog.ts";
 import { TrackingMessageDialog } from "./src/dashboard/tracking-message-dialog.ts";
-import { decideToolPolicy } from "./src/permissions/policies.ts";
+import { decideOrchestratorToolPolicy, decideToolPolicy } from "./src/permissions/policies.ts";
 import { checkAgentReadScope, checkAgentWriteScope, isPathInside } from "./src/permissions/scope-guard.ts";
-import { createDefaultSettings, cycleToolPolicy, knownPolicyTools, setToolPolicy, type AgentExtensionSettings, type ToolPolicy } from "./src/settings/settings.ts";
+import { createDefaultSettings, cycleToolPolicy, knownOrchestratorPolicyTools, knownPolicyTools, normalizeAgentExtensionSettings, setDefaultAgentModel, setOrchestratorToolPolicy, setToolPolicy, type AgentExtensionSettings, type DefaultAgentModelSelection, type ToolPolicy } from "./src/settings/settings.ts";
 
 const SETTINGS_ENTRY = "desgraca-agents-settings";
-const AGENT_ONLY_TOOL_NAMES = ["agent_write_proposal", "agent_edit_proposal", "agent_view_artifacts", "agent_create_note", "agent_edit_note", "agent_view_notes"];
 
 function normalizeSettings(saved: Partial<AgentExtensionSettings> = {}): AgentExtensionSettings {
-	const defaults = createDefaultSettings();
-	return {
-		...defaults,
-		...saved,
-		toolPolicies: Object.fromEntries(Object.entries({ ...defaults.toolPolicies, ...(saved.toolPolicies ?? {}) }).filter(([tool]) => tool !== "write" && tool !== "edit")),
-		childRunnerTools: Array.from(new Set([...(saved.childRunnerTools ?? defaults.childRunnerTools), ...AGENT_ONLY_TOOL_NAMES])).filter((tool) => tool !== "write" && tool !== "edit"),
-	};
+	return normalizeAgentExtensionSettings(saved);
 }
 
 export async function acceptArtifactProposal(job: AgentJob, artifact: AgentArtifact): Promise<string> {
@@ -118,18 +116,47 @@ function enforceAgentToolScope(
 	return undefined;
 }
 
+function enforceOrchestratorToolScope(
+	ctx: ExtensionContext,
+	toolName: string,
+	input: unknown,
+	orchestrator: { sessionId: string; cwd: string },
+): { block: true; reason: string } | undefined {
+	if (["write", "edit", "agent_write_proposal", "agent_edit_proposal"].includes(toolName)) {
+		return { block: true, reason: `Scope violation: ${toolName} is not available to orchestrator sessions.` };
+	}
+	const pathInput = getToolPathInput(toolName, input);
+	if (["read", "grep", "find", "ls"].includes(toolName)) {
+		const result = checkAgentReadScope(orchestrator.cwd || ctx.cwd, pathInput ?? ".");
+		if (!result.ok) return { block: true, reason: result.error ?? "Scope violation: orchestrator read denied." };
+		const agentsRoot = path.resolve(orchestrator.cwd || ctx.cwd, ".agents");
+		if (isPathInside(agentsRoot, result.absolutePath)) return { block: true, reason: "Scope violation: use orchestrator status/detail tools instead of reading .agents internals." };
+		return undefined;
+	}
+	return undefined;
+}
+
 export default function desgracaAgentsExtension(pi: ExtensionAPI) {
 	const store = new AgentStore();
+	const orchestratorStore = new OrchestratorStore(store);
 	let settings: AgentExtensionSettings = createDefaultSettings();
 	const runner = new PiSubprocessAgentRunner(store, () => settings);
+	const orchestratorRunner = new PiSubprocessOrchestratorRunner(orchestratorStore, () => settings);
 	const agentProcessContext = getAgentProcessEnvContext();
+	const orchestratorProcessContext = getOrchestratorProcessEnvContext();
 	if (agentProcessContext) registerAgentProposalTools(pi);
+	if (orchestratorProcessContext) registerOrchestratorTools(pi);
 
 	function persistSettings(): void {
 		pi.appendEntry<AgentExtensionSettings>(SETTINGS_ENTRY, settings);
 	}
 
 	function restoreSettings(ctx: ExtensionContext): void {
+		const orchestratorEnvContext = getOrchestratorProcessEnvContext();
+		if (orchestratorEnvContext?.settings) {
+			settings = normalizeSettings(orchestratorEnvContext.settings);
+			return;
+		}
 		const envSettings = process.env[AGENT_SETTINGS_ENV];
 		if (envSettings) {
 			try {
@@ -155,6 +182,23 @@ export default function desgracaAgentsExtension(pi: ExtensionAPI) {
 	});
 
 	pi.on("tool_call", async (event, ctx) => {
+		const orchestratorContext = getOrchestratorProcessEnvContext();
+		if (orchestratorContext) {
+			const scopeViolation = enforceOrchestratorToolScope(ctx, event.toolName, event.input, orchestratorContext);
+			if (scopeViolation) return scopeViolation;
+			const decision = decideOrchestratorToolPolicy(settings, event.toolName, event.input, { id: orchestratorContext.sessionId, name: "orchestrator" });
+			if (decision.action === "allow") return;
+			if (decision.action === "deny") return { block: true, reason: decision.reason };
+			if (!ctx.hasUI) return { block: true, reason: `${decision.reason} No UI is available for orchestrator-scoped approval.` };
+			const warningText = decision.warnings.length > 0 ? `\n\n${decision.warnings.join("\n")}` : "";
+			const ok = await ctx.ui.confirm(
+				`Allow orchestrator ${decision.toolName}?`,
+				`${decision.reason}\n\nSession: ${orchestratorContext.sessionId}\nInput: ${decision.inputSummary || "(empty)"}${warningText}`,
+			);
+			if (!ok) return { block: true, reason: "Denied by user through desgraca-agents orchestrator policy." };
+			return;
+		}
+
 		const agentContext = getAgentProcessEnvContext();
 		if (!agentContext) return;
 
@@ -212,6 +256,7 @@ export default function desgracaAgentsExtension(pi: ExtensionAPI) {
 			}
 
 			await store.loadFromDisk(ctx.cwd);
+			await orchestratorStore.loadFromDisk(ctx.cwd);
 			let dashboard: Dashboard | undefined;
 			await ctx.ui.custom((_tui, theme, _keybindings, done) => {
 				dashboard = new Dashboard(
@@ -291,6 +336,93 @@ export default function desgracaAgentsExtension(pi: ExtensionAPI) {
 							}
 							await runner.send(job.id, message);
 						},
+						createOrchestratorSession: async () => {
+							const modelOptions = getCreatableAgentModels(ctx);
+							const result = await ctx.ui.custom<CreateOrchestratorSessionDialogResult | undefined>(
+								(dialogTui, dialogTheme, _dialogKeybindings, dialogDone) => new CreateOrchestratorSessionDialog(dialogTui, dialogTheme, dialogDone, modelOptions),
+								{
+									overlay: true,
+									overlayOptions: {
+										anchor: "center",
+										width: "92%",
+										minWidth: 58,
+										maxHeight: "88%",
+										margin: 2,
+									},
+								},
+							);
+							if (!result) {
+								_tui.requestRender();
+								return;
+							}
+							const session = await orchestratorStore.create(ctx.cwd, { title: result.title, model: result.model });
+							if (result.initialPrompt) await orchestratorRunner.send(session.id, result.initialPrompt);
+							_tui.requestRender();
+						},
+						sendOrchestratorMessage: async (sessionId) => {
+							const session = orchestratorStore.get(sessionId);
+							const message = await ctx.ui.custom<string | undefined>(
+								(dialogTui, dialogTheme, _dialogKeybindings, dialogDone) => new TrackingMessageDialog(dialogTui, dialogTheme, dialogDone, session?.title ?? "orchestrator"),
+								{
+									overlay: true,
+									overlayOptions: {
+										anchor: "center",
+										width: "90%",
+										minWidth: 54,
+										maxHeight: "80%",
+										margin: 2,
+									},
+								},
+							);
+							if (!message) {
+								_tui.requestRender();
+								return;
+							}
+							await orchestratorRunner.send(sessionId, message);
+							_tui.requestRender();
+						},
+						approveOrchestratorStartRequest: async (sessionId, requestId) => {
+							const requests = await orchestratorStore.listStartRequests(sessionId);
+							const request = requests.find((item) => item.id === requestId);
+							if (!request) {
+								ctx.ui.notify("Start request no longer exists.", "warning");
+								return;
+							}
+							const ok = await ctx.ui.confirm("Start orchestrator-requested agent?", `Agent: ${request.agentName}\nWait requested: ${request.waitForResponse ? "yes" : "no"}\n\n${request.message}`);
+							if (!ok) return;
+							await orchestratorStore.resolveStartRequest(sessionId, requestId, { status: "approved" });
+							await orchestratorStore.syncAllDrafts(settings);
+							const latestRequests = await orchestratorStore.listStartRequests(sessionId);
+							const latest = latestRequests.find((item) => item.id === requestId) ?? request;
+							const job = latest.agentJobId ? store.get(latest.agentJobId) : store.list().find((item) => item.name === request.agentName);
+							if (!job) {
+								ctx.ui.notify(`No linked agent found for ${request.agentName}.`, "error");
+								return;
+							}
+							if (runner.isRunning(job.id) || job.startedAt || job.finalResponse || job.process || job.status !== "draft") {
+								ctx.ui.notify(`Agent ${job.name} has already started.`, "warning");
+								return;
+							}
+							await orchestratorStore.markStartRequestStarted(sessionId, requestId, job.id);
+							await runner.start(job.id);
+							_tui.requestRender();
+						},
+						refreshOrchestratorState: async () => {
+							await orchestratorStore.refresh();
+							await orchestratorStore.syncAllDrafts(settings);
+						},
+						denyOrchestratorStartRequest: async (sessionId, requestId) => {
+							const requests = await orchestratorStore.listStartRequests(sessionId);
+							const request = requests.find((item) => item.id === requestId);
+							if (!request) {
+								ctx.ui.notify("Start request no longer exists.", "warning");
+								return;
+							}
+							const ok = await ctx.ui.confirm("Deny orchestrator start request?", `Agent: ${request.agentName}\n\n${request.message}`);
+							if (!ok) return;
+							await orchestratorStore.resolveStartRequest(sessionId, requestId, { status: "denied", denialReason: "Denied by user from ORCHESTRATOR mode." });
+							_tui.requestRender();
+						},
 						deleteJob: async (job) => {
 							const ok = await ctx.ui.custom<boolean>(
 								(_dialogTui, dialogTheme, _dialogKeybindings, dialogDone) => new DeleteAgentDialog(job, dialogTheme, dialogDone),
@@ -336,9 +468,40 @@ export default function desgracaAgentsExtension(pi: ExtensionAPI) {
 							await fs.mkdir(job.writableRoot, { recursive: true });
 							store.appendLog(job.id, `Workspace ready: ${job.writableRoot}`);
 						},
+						editJob: async (job) => {
+							const modelOptions = getCreatableAgentModels(ctx);
+							const result = await ctx.ui.custom<CreateJobDialogResult | undefined>(
+								(dialogTui, dialogTheme, _dialogKeybindings, dialogDone) => new CreateJobDialog(dialogTui, dialogTheme, dialogDone, modelOptions, {
+									name: job.name,
+									task: job.task,
+									model: job.model,
+									title: " Edit draft agent ",
+									description: "Edit this draft worker before it starts. Saving marks it as user-edited.",
+								}),
+								{
+									overlay: true,
+									overlayOptions: {
+										anchor: "center",
+										width: "90%",
+										minWidth: 54,
+										maxHeight: "85%",
+										margin: 2,
+									},
+								},
+							);
+							if (!result) {
+								_tui.requestRender();
+								return;
+							}
+							const updated = store.updateUserEditable(job.id, result);
+							if (updated) store.appendLog(updated.id, "Draft agent edited by user.");
+							_tui.requestRender();
+						},
 					},
 					_tui,
 					theme,
+					orchestratorStore,
+					orchestratorRunner,
 				);
 				return dashboard;
 			});
@@ -350,29 +513,58 @@ export default function desgracaAgentsExtension(pi: ExtensionAPI) {
 		description: "Configure desgraca-agents permission policies",
 		handler: async (_args, ctx) => {
 			const tools = knownPolicyTools(settings);
+			const orchestratorTools = knownOrchestratorPolicyTools(settings);
 			if (ctx.mode !== "tui") {
-				if (ctx.hasUI) ctx.ui.notify(`Agent policies: ${tools.map((tool) => `${tool}=${settings.toolPolicies[tool]}`).join(", ")}`, "info");
+				if (ctx.hasUI) ctx.ui.notify(`Agent policies: ${tools.map((tool) => `${tool}=${settings.toolPolicies[tool]}`).join(", ")} | Orchestrator policies: ${orchestratorTools.map((tool) => `${tool}=${settings.orchestrator.toolPolicies[tool]}`).join(", ")}`, "info");
 				return;
 			}
 
 			await ctx.ui.custom((_tui, theme, _kb, done) => {
 				const container = new Container();
-				container.addChild(new Text(theme.fg("accent", theme.bold("desgraca-agents permission settings")), 1, 0));
-				container.addChild(new Text(theme.fg("dim", "Toggle policies between allow, ask, and deny. Proposal, artifact-view, and note tools are agent-only; bash remains sensitive if enabled."), 1, 0));
-				const items: SettingItem[] = tools.map((tool) => ({
-					id: tool,
-					label: tool,
-					currentValue: settings.toolPolicies[tool],
-					values: ["allow", "ask", "deny"],
-				}));
+				container.addChild(new Text(theme.fg("accent", theme.bold("desgraca-agents settings")), 1, 0));
+				container.addChild(new Text(theme.fg("dim", "Worker policies, orchestrator policies, and default model for orchestrator-created workers."), 1, 0));
+				const modelOptions = getCreatableAgentModels(ctx);
+				const modelValues = ["default", ...modelOptions.map((model) => `${model.provider}/${model.id}`)];
+				const currentDefaultModel = settings.agents.defaultModel === "default" ? "default" : `${settings.agents.defaultModel.provider}/${settings.agents.defaultModel.id}`;
+				const items: SettingItem[] = [
+					{
+						id: "agent-default-model",
+						label: "agents.defaultModel",
+						currentValue: currentDefaultModel,
+						values: modelValues,
+					},
+					...tools.map((tool) => ({
+						id: `worker:${tool}`,
+						label: `worker ${tool}`,
+						currentValue: settings.toolPolicies[tool],
+						values: ["allow", "ask", "deny"],
+					})),
+					...orchestratorTools.map((tool) => ({
+						id: `orchestrator:${tool}`,
+						label: `orchestrator ${tool}`,
+						currentValue: settings.orchestrator.toolPolicies[tool],
+						values: ["allow", "ask", "deny"],
+					})),
+				];
 				const list = new SettingsList(
 					items,
-					Math.min(items.length + 2, 14),
+					Math.min(items.length + 2, 18),
 					getSettingsListTheme(),
 					(id, newValue) => {
-						settings = setToolPolicy(settings, id, newValue as ToolPolicy);
+						if (id === "agent-default-model") {
+							let next: DefaultAgentModelSelection = "default";
+							if (newValue !== "default") {
+								const [provider, ...rest] = String(newValue).split("/");
+								next = { provider: provider ?? "", id: rest.join("/"), label: String(newValue) };
+							}
+							settings = setDefaultAgentModel(settings, next);
+						} else if (id.startsWith("worker:")) {
+							settings = setToolPolicy(settings, id.slice("worker:".length), newValue as ToolPolicy);
+						} else if (id.startsWith("orchestrator:")) {
+							settings = setOrchestratorToolPolicy(settings, id.slice("orchestrator:".length), newValue as ToolPolicy);
+						}
 						persistSettings();
-						ctx.ui.notify(`${id} policy is now ${newValue}`, "info");
+						ctx.ui.notify(`${id} is now ${newValue}`, "info");
 					},
 					() => done(undefined),
 				);

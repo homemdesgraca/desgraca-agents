@@ -3,6 +3,9 @@ import type { Component } from "@earendil-works/pi-tui";
 import type { AgentArtifact, AgentJob } from "../agents/agent-job.ts";
 import type { AgentStore } from "../agents/agent-store.ts";
 import { discoverArtifacts, type AgentRunner } from "../agents/agent-runner.ts";
+import type { OrchestratorRunner } from "../orchestrator/orchestrator-runner.ts";
+import type { OrchestratorSessionSnapshot } from "../orchestrator/orchestrator-session.ts";
+import type { OrchestratorStore } from "../orchestrator/orchestrator-store.ts";
 import { DASHBOARD_HELP_TEXT, parseDashboardAction } from "./keybindings.ts";
 import {
 	clampLine,
@@ -24,6 +27,7 @@ import {
 	splitColumns,
 	type DashboardMode,
 } from "./render.ts";
+import { renderOrchestratorLeft, renderOrchestratorRight } from "./render-orchestrator.ts";
 
 export interface DashboardActions {
 	createJob(): Promise<void>;
@@ -31,11 +35,17 @@ export interface DashboardActions {
 	notify(message: string, level?: "info" | "warning" | "error"): void;
 	deleteJob(job: AgentJob): Promise<boolean>;
 	clearJob(job: AgentJob): Promise<boolean>;
+	editJob?(job: AgentJob): Promise<void>;
 	sendMessage(job: AgentJob): Promise<void>;
 	openArtifactViewer(job: AgentJob, artifact: AgentArtifact): Promise<void>;
+	createOrchestratorSession?(): Promise<void>;
+	sendOrchestratorMessage?(sessionId: string): Promise<void>;
+	approveOrchestratorStartRequest?(sessionId: string, requestId: string): Promise<void>;
+	denyOrchestratorStartRequest?(sessionId: string, requestId: string): Promise<void>;
+	refreshOrchestratorState?(): Promise<void>;
 }
 
-const MODE_ORDER: DashboardMode[] = ["normal", "logs", "approvals", "artifacts", "help"];
+const MODE_ORDER: DashboardMode[] = ["normal", "orchestrator", "logs", "approvals", "artifacts", "help"];
 
 export class Dashboard implements Component {
 	private mode: DashboardMode = "normal";
@@ -47,6 +57,9 @@ export class Dashboard implements Component {
 	private cachedWidth: number | undefined;
 	private cachedLines: string[] | undefined;
 	private unsubscribe: (() => void) | undefined;
+	private orchestratorUnsubscribe: (() => void) | undefined;
+	private orchestratorRefreshTimer: ReturnType<typeof setInterval> | undefined;
+	private orchestratorSnapshot: OrchestratorSessionSnapshot | undefined;
 
 	constructor(
 		private readonly store: AgentStore,
@@ -54,17 +67,36 @@ export class Dashboard implements Component {
 		private readonly actions: DashboardActions,
 		private readonly tui: { requestRender: () => void },
 		private readonly theme?: Theme,
+		private readonly orchestratorStore?: OrchestratorStore,
+		private readonly orchestratorRunner?: OrchestratorRunner,
 	) {
 		this.unsubscribe = this.store.subscribe(() => {
 			if (this.mode === "logs") this.rightScrollOffset = Number.MAX_SAFE_INTEGER;
+			void this.refreshOrchestratorSnapshot();
 			this.invalidate();
 			this.tui.requestRender();
 		});
+		this.orchestratorUnsubscribe = this.orchestratorStore?.subscribe(() => {
+			void this.refreshOrchestratorSnapshot();
+			this.invalidate();
+			this.tui.requestRender();
+		});
+		if (this.orchestratorStore) {
+			this.orchestratorRefreshTimer = setInterval(() => {
+				const refresh = this.actions.refreshOrchestratorState?.() ?? this.orchestratorStore!.refresh();
+				void refresh.then(() => this.refreshOrchestratorSnapshot()).then(() => this.invalidateAndRender()).catch(() => undefined);
+			}, 1500);
+			void this.refreshOrchestratorSnapshot();
+		}
 	}
 
 	dispose(): void {
 		this.unsubscribe?.();
 		this.unsubscribe = undefined;
+		this.orchestratorUnsubscribe?.();
+		this.orchestratorUnsubscribe = undefined;
+		if (this.orchestratorRefreshTimer) clearInterval(this.orchestratorRefreshTimer);
+		this.orchestratorRefreshTimer = undefined;
 		if (this.noticeTimer) clearTimeout(this.noticeTimer);
 		this.noticeTimer = undefined;
 	}
@@ -85,7 +117,12 @@ export class Dashboard implements Component {
 		}
 
 		if (action.type === "select") {
-			this.store.selectByIndex(action.index);
+			if (this.mode === "orchestrator") {
+				this.orchestratorStore?.selectByIndex(action.index);
+				void this.refreshOrchestratorSnapshot();
+			} else {
+				this.store.selectByIndex(action.index);
+			}
 			this.artifactPreviewIndex = 0;
 			this.rightScrollOffset = 0;
 			this.invalidateAndRender();
@@ -105,6 +142,11 @@ export class Dashboard implements Component {
 				this.rightScrollOffset += 1;
 				break;
 			case "create":
+				if (this.mode === "orchestrator") {
+					await this.actions.createOrchestratorSession?.();
+					await this.refreshOrchestratorSnapshot();
+					break;
+				}
 				if (!this.requireMode("normal", "Create is available in AGENTS mode. Press G first.")) break;
 				await this.actions.createJob();
 				break;
@@ -137,6 +179,12 @@ export class Dashboard implements Component {
 					this.showNotice(`Deleted agent ${job.name}.`, "info");
 				}
 				break;
+			case "edit":
+				if (!this.requireMode("normal", "Edit is available in AGENTS mode. Press G first.")) break;
+				if (!job) this.showNotice("No selected job.", "warning");
+				else if (this.agentHasStartedOutput(job)) this.showNotice("Only draft agents can be edited in this version.", "warning");
+				else await this.actions.editJob?.(job);
+				break;
 			case "artifactPrevious":
 				this.moveArtifactSelection(-1, job);
 				break;
@@ -144,12 +192,20 @@ export class Dashboard implements Component {
 				this.moveArtifactSelection(1, job);
 				break;
 			case "artifactOpen":
-				await this.openSelectedArtifact(job);
+				if (this.mode === "orchestrator") await this.resolveFirstOrchestratorStart("approved");
+				else await this.openSelectedArtifact(job);
 				break;
 			case "toggleNotes":
 				this.toggleArtifactNotes();
 				break;
 			case "message":
+				if (this.mode === "orchestrator") {
+					const sessionId = this.orchestratorStore?.getSelectedId();
+					if (!sessionId) this.showNotice("Create or select an orchestrator session first.", "warning");
+					else await this.actions.sendOrchestratorMessage?.(sessionId);
+					await this.refreshOrchestratorSnapshot();
+					break;
+				}
 				if (!this.requireMode("logs", "Messages are available in TRACKING mode. Press T first.")) break;
 				if (!job) this.showNotice("No selected job.", "warning");
 				else {
@@ -158,14 +214,21 @@ export class Dashboard implements Component {
 				}
 				break;
 			case "approve":
-				if (this.requireMode("approvals", "Approve is available in APPROVALS mode. Press P first.")) this.resolveFirstApproval(job, "approved");
+				if (this.mode === "orchestrator") await this.resolveFirstOrchestratorStart("approved");
+				else if (this.requireMode("approvals", "Approve is available in APPROVALS mode. Press P first.")) this.resolveFirstApproval(job, "approved");
 				break;
 			case "deny":
-				if (this.requireMode("approvals", "Deny is available in APPROVALS mode. Press P first.")) this.resolveFirstApproval(job, "denied");
+				if (this.mode === "orchestrator") await this.resolveFirstOrchestratorStart("denied");
+				else if (this.requireMode("approvals", "Deny is available in APPROVALS mode. Press P first.")) this.resolveFirstApproval(job, "denied");
 				break;
 			case "logs":
 				this.mode = "logs";
 				this.rightScrollOffset = Number.MAX_SAFE_INTEGER;
+				break;
+			case "orchestrator":
+				this.mode = "orchestrator";
+				this.rightScrollOffset = 0;
+				await this.refreshOrchestratorSnapshot();
 				break;
 			case "approvals":
 				this.mode = "approvals";
@@ -205,6 +268,28 @@ export class Dashboard implements Component {
 			return;
 		}
 		this.store.resolveApproval(job.id, approval.id, status);
+	}
+
+	private async refreshOrchestratorSnapshot(): Promise<void> {
+		const sessionId = this.orchestratorStore?.getSelectedId();
+		this.orchestratorSnapshot = sessionId ? await this.orchestratorStore?.getSnapshot(sessionId) : undefined;
+	}
+
+	private async resolveFirstOrchestratorStart(status: "approved" | "denied"): Promise<void> {
+		const sessionId = this.orchestratorStore?.getSelectedId();
+		if (!sessionId) {
+			this.showNotice("No orchestrator session selected.", "warning");
+			return;
+		}
+		await this.refreshOrchestratorSnapshot();
+		const request = this.orchestratorSnapshot?.startRequests.find((item) => item.status === "pending");
+		if (!request) {
+			this.showNotice("No pending orchestrator start request.", "warning");
+			return;
+		}
+		if (status === "approved") await this.actions.approveOrchestratorStartRequest?.(sessionId, request.id);
+		else await this.actions.denyOrchestratorStartRequest?.(sessionId, request.id);
+		await this.refreshOrchestratorSnapshot();
 	}
 
 	private getVisibleArtifacts(job: AgentJob | undefined): AgentArtifact[] {
@@ -317,10 +402,15 @@ export class Dashboard implements Component {
 		}
 		lines.push(renderDivider(safeWidth, theme));
 
-		const left = [renderSectionTitle("Agents", leftWidth, theme), ...renderJobList(jobs, selectedId, leftWidth, theme)];
+		const left = this.mode === "orchestrator"
+			? renderOrchestratorLeft(this.orchestratorStore?.list() ?? [], this.orchestratorStore?.getSelectedId(), this.orchestratorSnapshot, jobs, leftWidth, theme)
+			: [renderSectionTitle("Agents", leftWidth, theme), ...renderJobList(jobs, selectedId, leftWidth, theme)];
 		let rightTitleText: string;
 		let right: string[];
-		if (this.mode === "logs") {
+		if (this.mode === "orchestrator") {
+			rightTitleText = "Orchestrator";
+			right = renderOrchestratorRight(this.orchestratorSnapshot, rightWidth, theme);
+		} else if (this.mode === "logs") {
 			rightTitleText = "Tracking";
 			right = [renderSectionTitle(rightTitleText, rightWidth, theme), ...renderTracking(selected, rightWidth, theme)];
 		} else if (this.mode === "approvals") {
@@ -339,7 +429,7 @@ export class Dashboard implements Component {
 				renderSectionTitle(rightTitleText, rightWidth, theme),
 				clampLine(`Notes: ${this.showArtifactNotes ? "shown" : "hidden"}${noteCount > 0 ? ` (${noteCount})` : ""}. Press V to toggle.`, rightWidth),
 				...renderArtifacts(selected, rightWidth, theme, this.artifactPreviewIndex, { showNotes: this.showArtifactNotes }),
-				...(artifactCount > 0 ? ["", clampLine("Use [ and ] to choose a visible item. Press O or Enter to open the large viewer.", rightWidth)] : []),
+				...(artifactCount > 0 ? ["", clampLine("Use [ and ] to choose a visible item. Press Enter to open the large viewer.", rightWidth)] : []),
 				...(artifact ? [
 					"",
 					renderSectionTitle("Selected artifact", rightWidth, theme),

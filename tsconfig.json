@@ -1,0 +1,29 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "ignoreDeprecations": "6.0",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "baseUrl": ".",
+    "paths": {
+      "@earendil-works/pi-coding-agent": ["/usr/lib/node_modules/pi/packages/coding-agent/dist/index.d.ts"],
+      "@earendil-works/pi-tui": ["/usr/lib/node_modules/pi/packages/tui/dist/index.d.ts"],
+      "typebox": ["/usr/lib/node_modules/pi/node_modules/typebox/build/index.d.mts"]
+    },
+    "strict": true,
+    "skipLibCheck": true,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "typeRoots": ["./node_modules/@types", "/usr/lib/node_modules/pi/node_modules/@types"],
+    "types": ["node"]
+  },
+  "include": [
+    "index.ts",
+    "src/**/*.ts"
+  ],
+  "exclude": [
+    ".agents",
+    ".ds",
+    "node_modules"
+  ]
+}

@@ -3,13 +3,14 @@ import type { Theme } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { AgentApproval, AgentArtifact, AgentJob } from "../agents/agent-job.ts";
 
-export type DashboardMode = "normal" | "logs" | "approvals" | "artifacts" | "help";
+export type DashboardMode = "normal" | "orchestrator" | "logs" | "approvals" | "artifacts" | "help";
 
 type FgColor = Parameters<Theme["fg"]>[0];
 type BgColor = Parameters<Theme["bg"]>[0];
 
 const MODE_LABELS: Record<DashboardMode, string> = {
 	normal: "AGENTS",
+	orchestrator: "ORCHESTRATOR",
 	logs: "TRACKING",
 	approvals: "APPROVALS",
 	artifacts: "ARTIFACTS",
@@ -173,7 +174,8 @@ export function renderJobList(jobs: AgentJob[], selectedId: string | undefined, 
 		const approvalCount = job.pendingApprovals.filter((approval) => approval.status === "pending").length;
 		const approvals = approvalCount > 0 ? ` ${fg(theme, "warning", `approvals:${approvalCount}`)}` : "";
 		const artifacts = fg(theme, "dim", `artifacts:${job.artifacts.length}`);
-		const row = `${pointer} ${number} ${fg(theme, selected ? "text" : "muted", job.name)} ${fg(theme, "dim", "[")}${formatStatusLabel(job.status, theme)}${fg(theme, "dim", "]")} ${artifacts}${approvals}`;
+		const source = job.source?.kind === "orchestrator" ? ` ${fg(theme, "accent", `ord:${job.source.order}`)}` : "";
+		const row = `${pointer} ${number} ${fg(theme, selected ? "text" : "muted", job.name)} ${fg(theme, "dim", "[")}${formatStatusLabel(job.status, theme)}${fg(theme, "dim", "]")} ${artifacts}${approvals}${source}`;
 		return selected ? bg(theme, "selectedBg", padLine(row, width)) : clampLine(row, width);
 	});
 }
@@ -213,6 +215,7 @@ export function renderJobDetails(job: AgentJob | undefined, width: number, theme
 		...renderField("Readable root", job.readableRoot, width, theme),
 		...renderField("Writable root", job.writableRoot, width, theme),
 		...renderField("Allowed tools", job.allowedTools.join(", ") || "(none)", width, theme),
+		...(job.source?.kind === "orchestrator" ? renderField("Source", `orchestrator session ${job.source.sessionId} draft ${job.source.draftId} order ${job.source.order}`, width, theme) : []),
 		...renderField("Model", job.model ? `${job.model.provider}/${job.model.id}` : "current pi default", width, theme),
 		...renderField("Task", job.task || "(empty)", width, theme),
 		...renderFinalResponse(job, width, theme),
@@ -350,11 +353,23 @@ export function renderFooterHints(width: number, theme?: Theme, mode: DashboardM
 			`${key(theme, "C")} create`,
 			`${key(theme, "1-9")} select agent`,
 			`${key(theme, "S")} start`,
+			`${key(theme, "I")} edit`,
 			`${key(theme, "X")} abort`,
 			`${key(theme, "K")} clear`,
 			`${key(theme, "Del")} delete`,
 			`${key(theme, "Q/E")} modes`,
-			`${key(theme, "T/P/F/H")} jump`,
+			`${key(theme, "O/T/P/F/H")} jump`,
+			commonClose,
+		],
+		orchestrator: [
+			`${key(theme, "1-9")} select session`,
+			`${key(theme, "C")} new session`,
+			`${key(theme, "M")} message`,
+			`${key(theme, "A/Enter")} approve start`,
+			`${key(theme, "N")} deny start`,
+			`${key(theme, "↑/↓")} scroll`,
+			`${key(theme, "Q/E")} modes`,
+			`${key(theme, "G/T/P/F/H")} jump`,
 			commonClose,
 		],
 		logs: [
@@ -362,7 +377,7 @@ export function renderFooterHints(width: number, theme?: Theme, mode: DashboardM
 			`${key(theme, "M")} message`,
 			`${key(theme, "↑/↓")} scroll`,
 			`${key(theme, "Q/E")} modes`,
-			`${key(theme, "G/P/F/H")} jump`,
+			`${key(theme, "G/O/P/F/H")} jump`,
 			commonClose,
 		],
 		approvals: [
@@ -371,24 +386,24 @@ export function renderFooterHints(width: number, theme?: Theme, mode: DashboardM
 			`${key(theme, "N")} deny`,
 			`${key(theme, "↑/↓")} scroll`,
 			`${key(theme, "Q/E")} modes`,
-			`${key(theme, "G/T/F/H")} jump`,
+			`${key(theme, "G/O/T/F/H")} jump`,
 			commonClose,
 		],
 		artifacts: [
 			`${key(theme, "1-9")} select agent`,
 			`${key(theme, "[")} prev`,
 			`${key(theme, "]")} next`,
-			`${key(theme, "O/Enter")} open`,
+			`${key(theme, "Enter")} open`,
 			`${key(theme, "V")} notes`,
 			`${key(theme, "R")} refresh`,
 			`${key(theme, "↑/↓")} scroll`,
 			`${key(theme, "Q/E")} modes`,
-			`${key(theme, "G/T/P/H")} jump`,
+			`${key(theme, "G/O/T/P/H")} jump`,
 			commonClose,
 		],
 		help: [
 			`${key(theme, "Q/E")} modes`,
-			`${key(theme, "G/T/P/F")} jump`,
+			`${key(theme, "G/O/T/P/F")} jump`,
 			`${key(theme, "↑/↓")} scroll`,
 			commonClose,
 		],
@@ -402,18 +417,19 @@ export function renderHelp(width: number, theme?: Theme): string[] {
 		heading("Navigation"),
 		`${key(theme, "1-9")} select an agent job from the left pane. The selected job drives every detail view and action, including ARTIFACTS mode.`,
 		`${key(theme, "↑/↓")} scroll the right-hand panel when its content is longer than the visible dashboard area.`,
-		`${key(theme, "G/T/P/F/H")} jump directly to AGENTS, TRACKING, APPROVALS, ARTIFACTS, and HELP. ${key(theme, "Q/E")} walks backward/forward through modes. ${key(theme, "Esc")} closes the dashboard.`,
+		`${key(theme, "G/O/T/P/F/H")} jump directly to AGENTS, ORCHESTRATOR, TRACKING, APPROVALS, ARTIFACTS, and HELP. ${key(theme, "Q/E")} walks backward/forward through modes. ${key(theme, "Esc")} closes the dashboard.`,
 		"",
 		heading("Job actions"),
 		`${key(theme, "C")} creates a task-scoped agent job in AGENTS mode. Opens an empty overlay for the worker name, model, and task; cancelling returns to this dashboard without creating anything.`,
-		`${key(theme, "S")} starts the selected job in AGENTS mode. If it was already started, clear it first with ${key(theme, "K")}. ${key(theme, "X")} aborts a running job. ${key(theme, "K")} clears selected job output after confirmation. ${key(theme, "Del/Backspace")} deletes the job and workspace after confirmation.`,
+		`${key(theme, "I")} edits a draft worker's name, task, and model in AGENTS mode. ${key(theme, "S")} starts the selected job in AGENTS mode. If it was already started, clear it first with ${key(theme, "K")}. ${key(theme, "X")} aborts a running job. ${key(theme, "K")} clears selected job output after confirmation. ${key(theme, "Del/Backspace")} deletes the job and workspace after confirmation.`,
 		`${key(theme, "M")} sends a follow-up message from TRACKING. ${key(theme, "A")} approves and ${key(theme, "N")} denies pending approvals from APPROVALS. ${key(theme, "R")} refreshes artifact discovery from ARTIFACTS.`,
 		"",
 		heading("Dashboard modes"),
 		`${key(theme, "Agents mode")} shows the selected agent's identity, status, readable root, writable root, allowed tools, model, task, final response preview, process state, and recent logs.`,
+		`${key(theme, "Orchestrator mode")} shows orchestrator sessions, the active plan, ordered worker drafts, pending start requests, wait state, and recent transcript. Use ${key(theme, "M")} to message the orchestrator, ${key(theme, "C")} to create a session, and ${key(theme, "A/Enter")} or ${key(theme, "N")} to approve or deny start requests through confirmation overlays.`,
 		`${key(theme, "Tracking mode")} auto-scrolls as work arrives and shows a readable timeline of user messages, worker responses, status changes, artifact-writing guidance, and detailed tool activity. Use ${key(theme, "M")} to keep talking to a finished worker.`,
 		`${key(theme, "Approvals mode")} shows pending sensitive tool requests for the selected agent, including tool name, input summary, policy reason, and simple risk warnings.`,
-		`${key(theme, "Artifacts mode")} lists files discovered under the selected agent's .agents workspace, with notes labeled separately. Use ${key(theme, "[")} and ${key(theme, "]")} to move between visible items, ${key(theme, "O/Enter")} to open a large artifact viewer, and ${key(theme, "V")} to hide or show notes. ${key(theme, "1-9")} still selects agents in this mode.`,
+		`${key(theme, "Artifacts mode")} lists files discovered under the selected agent's .agents workspace, with notes labeled separately. Use ${key(theme, "[")} and ${key(theme, "]")} to move between visible items, ${key(theme, "Enter")} to open a large artifact viewer, and ${key(theme, "V")} to hide or show notes. ${key(theme, "1-9")} still selects agents in this mode.`,
 		`${key(theme, "Help mode")} is this reference view with grouped navigation, job actions, and mode descriptions.`,
 	];
 	return lines.flatMap((line) => (line === "" ? [""] : wrapWords(line, width))).map((line) => clampLine(line, width));

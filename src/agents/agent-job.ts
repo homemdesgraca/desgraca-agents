@@ -64,6 +64,13 @@ export interface AgentProcessMetadata {
 	readOnly?: boolean;
 }
 
+export interface AgentJobSourceMetadata {
+	kind: "orchestrator";
+	sessionId: string;
+	draftId: string;
+	order: number;
+}
+
 export interface AgentJob {
 	id: string;
 	name: string;
@@ -83,6 +90,8 @@ export interface AgentJob {
 	startedAt?: number;
 	finishedAt?: number;
 	process?: AgentProcessMetadata;
+	source?: AgentJobSourceMetadata;
+	userEditedAt?: number;
 }
 
 export function createId(): string {

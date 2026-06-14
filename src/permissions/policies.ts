@@ -1,6 +1,6 @@
 import type { AgentJob } from "../agents/agent-job.ts";
 import type { AgentExtensionSettings, ToolPolicy } from "../settings/settings.ts";
-import { getToolPolicy } from "../settings/settings.ts";
+import { getOrchestratorToolPolicy, getToolPolicy } from "../settings/settings.ts";
 import { getRiskWarnings } from "./risk-warnings.ts";
 
 export type PolicyAction = "allow" | "ask" | "deny";
@@ -26,6 +26,12 @@ export function summarizeToolInput(toolName: string, input: unknown): string {
 	if (toolName === "agent_write_proposal" || toolName === "agent_edit_proposal") {
 		return String(data.originalPath ?? "").slice(0, 180);
 	}
+	if (toolName === "orchestrator_create_agent_draft") {
+		return `${String(data.name ?? "")} order ${String(data.order ?? "")}`.slice(0, 180);
+	}
+	if (toolName === "orchestrator_request_start_agent" || toolName === "orchestrator_get_agent_details") {
+		return `${String(data.name ?? "")} wait=${String(data.waitForResponse ?? false)}`.slice(0, 180);
+	}
 	if (toolName === "grep") return `${String(data.pattern ?? "")} in ${String(data.path ?? ".")}`.slice(0, 180);
 	if (toolName === "find") return `${String(data.pattern ?? "*")} in ${String(data.path ?? ".")}`.slice(0, 180);
 	try {
@@ -35,13 +41,12 @@ export function summarizeToolInput(toolName: string, input: unknown): string {
 	}
 }
 
-export function decideToolPolicy(
-	settings: AgentExtensionSettings,
+function buildDecision(
+	policy: ToolPolicy,
 	toolName: string,
 	input: unknown,
 	agent?: Pick<AgentJob, "id" | "name">,
 ): ToolPolicyDecision {
-	const policy = getToolPolicy(settings, toolName);
 	const warnings = getRiskWarnings(toolName, input);
 	const inputSummary = summarizeToolInput(toolName, input);
 	const agentLabel = agent ? ` for agent ${agent.name}` : "";
@@ -80,4 +85,22 @@ export function decideToolPolicy(
 		warnings,
 		policy,
 	};
+}
+
+export function decideToolPolicy(
+	settings: AgentExtensionSettings,
+	toolName: string,
+	input: unknown,
+	agent?: Pick<AgentJob, "id" | "name">,
+): ToolPolicyDecision {
+	return buildDecision(getToolPolicy(settings, toolName), toolName, input, agent);
+}
+
+export function decideOrchestratorToolPolicy(
+	settings: AgentExtensionSettings,
+	toolName: string,
+	input: unknown,
+	session?: { id: string; name: string },
+): ToolPolicyDecision {
+	return buildDecision(getOrchestratorToolPolicy(settings, toolName), toolName, input, session ? { id: session.id, name: session.name } : undefined);
 }

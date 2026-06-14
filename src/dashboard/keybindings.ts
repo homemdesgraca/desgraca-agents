@@ -10,6 +10,7 @@ export type DashboardAction =
 	| { type: "approve" }
 	| { type: "deny" }
 	| { type: "logs" }
+	| { type: "orchestrator" }
 	| { type: "approvals" }
 	| { type: "artifacts" }
 	| { type: "help" }
@@ -18,6 +19,7 @@ export type DashboardAction =
 	| { type: "nextMode" }
 	| { type: "refresh" }
 	| { type: "delete" }
+	| { type: "edit" }
 	| { type: "message" }
 	| { type: "artifactPrevious" }
 	| { type: "artifactNext" }
@@ -26,7 +28,7 @@ export type DashboardAction =
 	| { type: "scrollUp" }
 	| { type: "scrollDown" };
 
-export const DASHBOARD_HELP_TEXT = "Mode keys: G/T/P/F/H direct, Q/E walk modes. Esc closes.";
+export const DASHBOARD_HELP_TEXT = "Mode keys: G/O/T/P/F/H direct, Q/E walk modes. Esc closes.";
 
 export function parseDashboardAction(input: string): DashboardAction | undefined {
 	if (matchesKey(input, "escape") || matchesKey(input, "ctrl+c")) return { type: "close" };
@@ -38,16 +40,17 @@ export function parseDashboardAction(input: string): DashboardAction | undefined
 	if (input === "s" || input === "S") return { type: "start" };
 	if (input === "x" || input === "X") return { type: "abort" };
 	if (input === "m" || input === "M") return { type: "message" };
+	if (input === "i" || input === "I") return { type: "edit" };
 	if (input === "a" || input === "A") return { type: "approve" };
 	if (input === "n" || input === "N") return { type: "deny" };
 	if (input === "g" || input === "G") return { type: "normal" };
+	if (input === "o" || input === "O") return { type: "orchestrator" };
 	if (input === "t" || input === "T") return { type: "logs" };
 	if (input === "p" || input === "P") return { type: "approvals" };
 	if (input === "f" || input === "F") return { type: "artifacts" };
 	if (input === "h" || input === "H" || input === "?") return { type: "help" };
 	if (input === "[") return { type: "artifactPrevious" };
 	if (input === "]") return { type: "artifactNext" };
-	if (input === "o" || input === "O") return { type: "artifactOpen" };
 	if (matchesKey(input, "enter")) return { type: "artifactOpen" };
 	if (input === "v" || input === "V") return { type: "toggleNotes" };
 	if (matchesKey(input, "delete") || matchesKey(input, "backspace")) return { type: "delete" };
