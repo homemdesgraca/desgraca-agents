@@ -27,6 +27,33 @@ function atomicTempPath(filePath: string): string {
 	return `${filePath}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`;
 }
 
+function sleep(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export async function withFileLock<T>(filePath: string, fn: () => Promise<T>, timeoutMs = 10_000): Promise<T> {
+	await ensureDir(path.dirname(filePath));
+	const lockPath = `${filePath}.lock`;
+	const start = Date.now();
+	let handle: fs.FileHandle | undefined;
+	while (!handle) {
+		try {
+			handle = await fs.open(lockPath, "wx");
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+			if (Date.now() - start > timeoutMs) throw new Error(`Timed out waiting for lock: ${lockPath}`);
+			await sleep(25);
+		}
+	}
+	try {
+		await handle.writeFile(`${process.pid}\n${Date.now()}\n`, "utf8");
+		return await fn();
+	} finally {
+		await handle.close().catch(() => undefined);
+		await fs.rm(lockPath, { force: true }).catch(() => undefined);
+	}
+}
+
 export async function writeJsonFileAtomic(filePath: string, value: unknown): Promise<void> {
 	await ensureDir(path.dirname(filePath));
 	const tmpPath = atomicTempPath(filePath);

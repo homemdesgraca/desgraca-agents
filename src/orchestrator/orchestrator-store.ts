@@ -5,7 +5,7 @@ import { createId, getAgentsRoot, sanitizeAgentName } from "../agents/agent-job.
 import type { AgentStore } from "../agents/agent-store.ts";
 import type { AgentExtensionSettings } from "../settings/settings.ts";
 import type { OrchestratorDraftStatus, OrchestratorSession, OrchestratorSessionSnapshot, OrchestratorSessionStatus, OrchestratorStartRequest, OrchestratorStartRequestStatus, OrchestratorTranscriptEntry, OrchestratorWorkerDraft } from "./orchestrator-session.ts";
-import { appendJsonLine, ensureDir, readJsonFile, readJsonLines, writeJsonFileAtomic, writeTextFileAtomic } from "./persistence.ts";
+import { appendJsonLine, ensureDir, readJsonFile, readJsonLines, withFileLock, writeJsonFileAtomic, writeTextFileAtomic } from "./persistence.ts";
 
 const SESSION_FILE = "session.json";
 const TRANSCRIPT_FILE = "transcript.jsonl";
@@ -245,14 +245,19 @@ export class OrchestratorStore {
 	async listDrafts(sessionId: string): Promise<OrchestratorWorkerDraft[]> {
 		const session = this.sessions.get(sessionId);
 		if (!session) return [];
-		const drafts = await readJsonFile<OrchestratorWorkerDraft[]>(path.join(this.sessionDir(session.cwd, session.id), DRAFTS_FILE), []);
-		return drafts.sort((a, b) => a.order - b.order || a.createdAt - b.createdAt);
+		const drafts = await this.readDraftsRaw(session);
+		const repaired = await this.repairDraftsFromLinkedJobs(session, drafts);
+		if (repaired.changed) {
+			await this.writeDraftsRaw(session, repaired.drafts);
+			await this.updateSession(sessionId, { updatedAt: now() });
+		}
+		return this.sortDrafts(repaired.drafts);
 	}
 
 	async saveDrafts(sessionId: string, drafts: OrchestratorWorkerDraft[]): Promise<void> {
 		const session = this.sessions.get(sessionId);
 		if (!session) throw new Error(`Unknown orchestrator session: ${sessionId}`);
-		await writeJsonFileAtomic(path.join(this.sessionDir(session.cwd, session.id), DRAFTS_FILE), drafts.sort((a, b) => a.order - b.order || a.createdAt - b.createdAt));
+		await this.writeDraftsRaw(session, drafts);
 		await this.updateSession(sessionId, { updatedAt: now() });
 	}
 
@@ -265,24 +270,31 @@ export class OrchestratorStore {
 		if (!task) throw new Error("Worker task is required.");
 		if (!Number.isFinite(input.order) || input.order <= 0) throw new Error("Worker order must be a positive number.");
 
-		const timestamp = now();
-		const drafts = await this.listDrafts(sessionId);
-		const existingIndex = drafts.findIndex((draft) => sanitizeAgentName(draft.name) === name);
-		let draft: OrchestratorWorkerDraft;
-		if (existingIndex >= 0) {
-			draft = { ...drafts[existingIndex]!, name, task, order: input.order, updatedAt: timestamp };
-			drafts[existingIndex] = draft;
-		} else {
-			draft = { id: createId(), sessionId, name, task, order: input.order, status: "queued", createdAt: timestamp, updatedAt: timestamp };
-			drafts.push(draft);
-		}
+		let result: { draft: OrchestratorWorkerDraft; job: AgentJob; warning?: string } | undefined;
+		await withFileLock(this.draftsFile(session), async () => {
+			const timestamp = now();
+			const rawDrafts = await this.readDraftsRaw(session);
+			const repaired = await this.repairDraftsFromLinkedJobs(session, rawDrafts);
+			const drafts = repaired.drafts;
+			const existingIndex = drafts.findIndex((draft) => sanitizeAgentName(draft.name) === name);
+			let draft: OrchestratorWorkerDraft;
+			if (existingIndex >= 0) {
+				draft = { ...drafts[existingIndex]!, name, task, order: input.order, updatedAt: timestamp };
+				drafts[existingIndex] = draft;
+			} else {
+				draft = { id: createId(), sessionId, name, task, order: input.order, status: "queued", createdAt: timestamp, updatedAt: timestamp };
+				drafts.push(draft);
+			}
 
-		const sync = await this.syncDraftToAgent(session, draft, settings);
-		draft = { ...draft, agentJobId: sync.job.id, warning: sync.warning };
-		const nextDrafts = drafts.map((item) => item.id === draft.id ? draft : item);
-		await this.saveDrafts(sessionId, nextDrafts);
-		await this.appendTranscript(sessionId, { kind: "tool", title: "Draft updated", toolName: "orchestrator_create_agent_draft", message: `${draft.order}. ${draft.name}`, output: sync.warning });
-		return { draft, job: sync.job, warning: sync.warning };
+			const sync = await this.syncDraftToAgent(session, draft, settings);
+			draft = { ...draft, agentJobId: sync.job.id, warning: sync.warning };
+			const nextDrafts = drafts.map((item) => item.id === draft.id ? draft : item);
+			await this.writeDraftsRaw(session, nextDrafts);
+			result = { draft, job: sync.job, warning: sync.warning };
+		});
+		await this.updateSession(sessionId, { updatedAt: now() });
+		await this.appendTranscript(sessionId, { kind: "tool", title: "Draft updated", toolName: "orchestrator_create_agent_draft", message: `${result!.draft.order}. ${result!.draft.name}`, output: result!.warning });
+		return result!;
 	}
 
 	async syncAllDrafts(settings: AgentExtensionSettings): Promise<void> {
@@ -419,6 +431,50 @@ export class OrchestratorStore {
 	getSessionDir(sessionId: string): string | undefined {
 		const session = this.sessions.get(sessionId);
 		return session ? this.sessionDir(session.cwd, session.id) : undefined;
+	}
+
+	private draftsFile(session: OrchestratorSession): string {
+		return path.join(this.sessionDir(session.cwd, session.id), DRAFTS_FILE);
+	}
+
+	private sortDrafts(drafts: OrchestratorWorkerDraft[]): OrchestratorWorkerDraft[] {
+		return [...drafts].sort((a, b) => a.order - b.order || a.createdAt - b.createdAt);
+	}
+
+	private async readDraftsRaw(session: OrchestratorSession): Promise<OrchestratorWorkerDraft[]> {
+		return readJsonFile<OrchestratorWorkerDraft[]>(this.draftsFile(session), []);
+	}
+
+	private async writeDraftsRaw(session: OrchestratorSession, drafts: OrchestratorWorkerDraft[]): Promise<void> {
+		await writeJsonFileAtomic(this.draftsFile(session), this.sortDrafts(drafts));
+	}
+
+	private async repairDraftsFromLinkedJobs(session: OrchestratorSession, drafts: OrchestratorWorkerDraft[]): Promise<{ drafts: OrchestratorWorkerDraft[]; changed: boolean }> {
+		if (drafts.length === 0 && session.status === "idle") return { drafts, changed: false };
+		const byDraftId = new Set(drafts.map((draft) => draft.id));
+		const byJobId = new Set(drafts.flatMap((draft) => draft.agentJobId ? [draft.agentJobId] : []));
+		let changed = false;
+		const next = [...drafts];
+		for (const job of this.agentStore.list()) {
+			if (job.source?.kind !== "orchestrator" || job.source.sessionId !== session.id) continue;
+			if (byDraftId.has(job.source.draftId) || byJobId.has(job.id)) continue;
+			next.push({
+				id: job.source.draftId,
+				sessionId: session.id,
+				name: job.name,
+				task: job.task,
+				order: job.source.order,
+				status: draftStatusFromJob(job, "queued"),
+				agentJobId: job.id,
+				createdAt: job.createdAt,
+				updatedAt: now(),
+				warning: "Draft row was repaired from linked agent job metadata.",
+			});
+			byDraftId.add(job.source.draftId);
+			byJobId.add(job.id);
+			changed = true;
+		}
+		return { drafts: this.sortDrafts(next), changed };
 	}
 
 	private resolveDraftModel(session: OrchestratorSession, settings: AgentExtensionSettings): AgentModelSelection | undefined {

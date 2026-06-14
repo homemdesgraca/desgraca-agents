@@ -6,7 +6,7 @@ import { Container, type SettingItem, SettingsList, Text } from "@earendil-works
 import { AGENT_SETTINGS_ENV, getAgentProcessEnvContext } from "./src/agents/agent-env.ts";
 import type { AgentArtifact, AgentJob, AgentModelSelection } from "./src/agents/agent-job.ts";
 import { AgentStore } from "./src/agents/agent-store.ts";
-import { PiSubprocessAgentRunner } from "./src/agents/agent-runner.ts";
+import { discoverArtifacts, PiSubprocessAgentRunner } from "./src/agents/agent-runner.ts";
 import { registerAgentProposalTools } from "./src/agents/proposal-tools.ts";
 import { getOrchestratorProcessEnvContext } from "./src/orchestrator/orchestrator-env.ts";
 import { PiSubprocessOrchestratorRunner } from "./src/orchestrator/orchestrator-runner.ts";
@@ -95,6 +95,59 @@ function setToolPathInput(input: unknown, absolutePath: string): void {
 	const data = input as Record<string, unknown>;
 	if ("path" in data || !("file_path" in data)) data.path = absolutePath;
 	else data.file_path = absolutePath;
+}
+
+function compactText(text: string | undefined, limit = 1200): string {
+	if (!text) return "(none)";
+	const compact = text.trim();
+	return compact.length > limit ? `${compact.slice(0, limit)}\n... truncated` : compact;
+}
+
+export async function writeOrchestratorHandoffNote(job: AgentJob, allJobs: AgentJob[]): Promise<boolean> {
+	if (job.source?.kind !== "orchestrator") return false;
+	const startTime = Date.now();
+	const priorJobs = allJobs
+		.filter((candidate) => candidate.id !== job.id)
+		.filter((candidate) => candidate.source?.kind === "orchestrator" && candidate.source.sessionId === job.source?.sessionId)
+		.filter((candidate) => candidate.status === "done")
+		.filter((candidate) => !candidate.finishedAt || candidate.finishedAt <= startTime)
+		.sort((a, b) => (a.finishedAt ?? a.updatedAt) - (b.finishedAt ?? b.updatedAt));
+	if (priorJobs.length === 0) return false;
+
+	const lines = [
+		"# Orchestrator handoff",
+		"",
+		"Important: the workers below produced review-only notes, proposals, and artifacts. Their proposed changes have NOT been applied to the main project files unless the user explicitly accepted them. Do not search the main project expecting these proposed changes to exist.",
+		"",
+		"Use this note as context before continuing. If you need details from referenced prior artifacts, read the listed `.agents/...` paths directly. Treat proposal files as proposed state, not actual project state.",
+		"",
+		"## Prior completed workers",
+	];
+
+	for (const prior of priorJobs) {
+		const artifacts = await discoverArtifacts(prior).catch(() => prior.artifacts ?? []);
+		const notes = artifacts.filter((artifact) => artifact.kind === "note");
+		const proposals = artifacts.filter((artifact) => artifact.kind === "proposal");
+		const others = artifacts.filter((artifact) => artifact.kind !== "note" && artifact.kind !== "proposal");
+		lines.push("", `### ${prior.source?.order ?? "-"}. ${prior.name}`, "", `Status: ${prior.status}`, `Task: ${prior.task}`, "", "Final response summary:", compactText(prior.finalResponse));
+		if (notes.length > 0) {
+			lines.push("", "Notes:");
+			for (const note of notes) lines.push(`- ${note.path}`);
+		}
+		if (proposals.length > 0) {
+			lines.push("", "Unapplied proposals:");
+			for (const proposal of proposals) lines.push(`- ${proposal.path}${proposal.originalPath ? ` -> ${proposal.originalPath}` : ""}`);
+		}
+		if (others.length > 0) {
+			lines.push("", "Other artifacts:");
+			for (const artifact of others) lines.push(`- ${artifact.path}`);
+		}
+	}
+
+	const notePath = path.join(job.writableRoot, "notes", "orchestrator-handoff.md");
+	await fs.mkdir(path.dirname(notePath), { recursive: true });
+	await fs.writeFile(notePath, `${lines.join("\n")}\n`, "utf8");
+	return true;
 }
 
 function enforceAgentToolScope(
@@ -406,6 +459,7 @@ export default function desgracaAgentsExtension(pi: ExtensionAPI) {
 								ctx.ui.notify(`Agent ${job.name} has already started.`, "warning");
 								return;
 							}
+							await writeOrchestratorHandoffNote(job, store.list());
 							await orchestratorStore.markStartRequestStarted(sessionId, requestId, job.id);
 							await runner.start(job.id);
 							_tui.requestRender();

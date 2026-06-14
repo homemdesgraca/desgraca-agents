@@ -254,6 +254,55 @@ describe("orchestrator sessions", () => {
 
 			const second = await store.createOrUpdateDraft(session.id, { name: "Concrete", task: "concrete model task", order: 3 }, setDefaultAgentModel(createDefaultSettings(), concreteModel));
 			assert.deepEqual(second.job?.model, concreteModel);
+
+			await Promise.all([
+				store.createOrUpdateDraft(session.id, { name: "Concurrent A", task: "first concurrent task", order: 4 }, createDefaultSettings()),
+				store.createOrUpdateDraft(session.id, { name: "Concurrent B", task: "second concurrent task", order: 5 }, createDefaultSettings()),
+			]);
+			assert.deepEqual((await store.listDrafts(session.id)).map((draft) => draft.name).filter((name) => name.startsWith("concurrent-")), ["concurrent-a", "concurrent-b"]);
+
+			await store.setStatus(session.id, "done");
+			await store.saveDrafts(session.id, []);
+			const repaired = await store.listDrafts(session.id);
+			assert.ok(repaired.some((draft) => draft.name === "editable" && draft.warning?.includes("repaired")));
+			assert.ok(repaired.some((draft) => draft.name === "concrete"));
+		} finally {
+			await fsp.rm(cwd, { recursive: true, force: true });
+		}
+	});
+
+	test("orchestrator handoff note tells later workers prior proposals are unapplied", async () => {
+		const { AgentStore } = await importCompiled("src/agents/agent-store.js");
+		const { OrchestratorStore } = await importCompiled("src/orchestrator/orchestrator-store.js");
+		const { createDefaultSettings } = await importCompiled("src/settings/settings.js");
+		const { writeOrchestratorHandoffNote } = await importCompiled("index.js");
+		const { PiSubprocessAgentRunner } = await importCompiled("src/agents/agent-runner.js");
+		const cwd = await fsp.mkdtemp(path.join(os.tmpdir(), "handoff-note-"));
+		try {
+			const agentStore = new AgentStore();
+			await agentStore.loadFromDisk(cwd);
+			const store = new OrchestratorStore(agentStore);
+			await store.loadFromDisk(cwd);
+			const session = await store.create(cwd, { title: "Handoff" });
+			const prior = await store.createOrUpdateDraft(session.id, { name: "Prior Worker", task: "prepare proposed change", order: 1 }, createDefaultSettings());
+			const current = await store.createOrUpdateDraft(session.id, { name: "Later Worker", task: "continue after prior work", order: 2 }, createDefaultSettings());
+			agentStore.update(prior.job.id, { status: "done", finalResponse: "Created a proposal and note for the later worker.", finishedAt: Date.now() - 1000 });
+			await fsp.mkdir(path.join(prior.job.writableRoot, "notes"), { recursive: true });
+			await fsp.mkdir(path.join(prior.job.writableRoot, "proposals", "src"), { recursive: true });
+			await fsp.writeFile(path.join(prior.job.writableRoot, "notes", "summary.md"), "summary note");
+			await fsp.writeFile(path.join(prior.job.writableRoot, "proposals", "src", "file.ts"), "proposed content");
+
+			assert.equal(await writeOrchestratorHandoffNote(current.job, agentStore.list()), true);
+			const handoffPath = path.join(current.job.writableRoot, "notes", "orchestrator-handoff.md");
+			const handoff = await fsp.readFile(handoffPath, "utf8");
+			assert.match(handoff, /NOT been applied to the main project files/);
+			assert.match(handoff, /prior-worker/);
+			assert.match(handoff, /summary\.md/);
+			assert.match(handoff, /proposals.*src.*file\.ts/);
+
+			const runner = new PiSubprocessAgentRunner(agentStore, createDefaultSettings);
+			assert.match(runner.buildPrompt(current.job), /Earlier workers in this orchestrator session produced a handoff note/);
+			assert.match(runner.buildPrompt(current.job), /Prior worker proposals are NOT applied/);
 		} finally {
 			await fsp.rm(cwd, { recursive: true, force: true });
 		}

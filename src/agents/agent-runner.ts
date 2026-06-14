@@ -217,6 +217,8 @@ export class PiSubprocessAgentRunner implements AgentRunner {
 	}
 
 	private buildPrompt(job: AgentJob, followUp?: string): string {
+		const handoffPath = path.join(job.writableRoot, "notes", "orchestrator-handoff.md");
+		const hasOrchestratorHandoff = fsSync.existsSync(handoffPath);
 		const base = [
 			`You are an isolated task-scoped worker named ${job.name}.`,
 			`Main project root: ${job.readableRoot}`,
@@ -228,6 +230,12 @@ export class PiSubprocessAgentRunner implements AgentRunner {
 			"Use agent_create_note, agent_edit_note, and agent_view_notes when you need to record, revise, list, or read notes. The note tools manage note files for you.",
 			"The user will inspect proposals before applying anything to the real project.",
 			"If you need to change project code, create a proposal with agent_write_proposal or agent_edit_proposal instead of editing the main project directly.",
+			...(hasOrchestratorHandoff ? [
+				"Important orchestrator handoff:",
+				"Earlier workers in this orchestrator session produced a handoff note for you at notes/orchestrator-handoff.md.",
+				"Read it with agent_view_notes before assuming project state. Prior worker proposals are NOT applied to the main project files, so do not search the main project expecting those proposed changes to exist.",
+				"Treat referenced prior proposals and notes as review-only context unless the user has explicitly applied them.",
+			] : []),
 			"Task:",
 			job.task,
 		];
