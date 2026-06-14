@@ -68,8 +68,8 @@ function plainDiff(originalContent: string, proposalContent: string): string {
 	return truncateText(lines.join("\n"));
 }
 
-async function walkArtifactFiles(root: string): Promise<Array<{ relativePath: string; absolutePath: string; sizeBytes: number; originalPath?: string; kind: "artifact" | "proposal" }>> {
-	const files: Array<{ relativePath: string; absolutePath: string; sizeBytes: number; originalPath?: string; kind: "artifact" | "proposal" }> = [];
+async function walkArtifactFiles(root: string): Promise<Array<{ relativePath: string; absolutePath: string; sizeBytes: number; originalPath?: string; kind: "artifact" | "proposal" | "note" }>> {
+	const files: Array<{ relativePath: string; absolutePath: string; sizeBytes: number; originalPath?: string; kind: "artifact" | "proposal" | "note" }> = [];
 	async function walk(current: string): Promise<void> {
 		let entries: any[];
 		try {
@@ -88,11 +88,12 @@ async function walkArtifactFiles(root: string): Promise<Array<{ relativePath: st
 			const stat = await fs.stat(absolutePath);
 			const relativePath = path.relative(root, absolutePath);
 			const isProposal = relativePath === "proposals" || relativePath.startsWith(`proposals${path.sep}`);
+			const isNote = relativePath === "notes" || relativePath.startsWith(`notes${path.sep}`);
 			files.push({
 				relativePath,
 				absolutePath,
 				sizeBytes: stat.size,
-				kind: isProposal ? "proposal" : "artifact",
+				kind: isProposal ? "proposal" : isNote ? "note" : "artifact",
 				originalPath: isProposal ? path.relative("proposals", relativePath) : undefined,
 			});
 		}
@@ -101,7 +102,7 @@ async function walkArtifactFiles(root: string): Promise<Array<{ relativePath: st
 	return files.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
 }
 
-async function resolveArtifactPath(cwd: string, writableRoot: string, inputPath: string): Promise<{ relativePath: string; absolutePath: string; originalPath?: string; kind: "artifact" | "proposal" }> {
+async function resolveArtifactPath(cwd: string, writableRoot: string, inputPath: string): Promise<{ relativePath: string; absolutePath: string; originalPath?: string; kind: "artifact" | "proposal" | "note" }> {
 	const root = path.resolve(writableRoot);
 	const stripped = inputPath.startsWith("@") ? inputPath.slice(1) : inputPath;
 	const candidates = [
@@ -116,7 +117,8 @@ async function resolveArtifactPath(cwd: string, writableRoot: string, inputPath:
 			if (!stat.isFile()) continue;
 			const relativePath = path.relative(root, candidate);
 			const isProposal = relativePath === "proposals" || relativePath.startsWith(`proposals${path.sep}`);
-			return { relativePath, absolutePath: candidate, kind: isProposal ? "proposal" : "artifact", originalPath: isProposal ? path.relative("proposals", relativePath) : undefined };
+			const isNote = relativePath === "notes" || relativePath.startsWith(`notes${path.sep}`);
+			return { relativePath, absolutePath: candidate, kind: isProposal ? "proposal" : isNote ? "note" : "artifact", originalPath: isProposal ? path.relative("proposals", relativePath) : undefined };
 		} catch {}
 	}
 	throw new Error(`Artifact not found in ${root}: ${inputPath}`);

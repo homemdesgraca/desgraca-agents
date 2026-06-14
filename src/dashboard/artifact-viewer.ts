@@ -14,6 +14,11 @@ interface ViewerLine {
 	text: string;
 }
 
+interface RenderedViewerLine {
+	kind: LineKind;
+	text: string;
+}
+
 export interface ArtifactViewerOptions {
 	job: AgentJob;
 	artifact: AgentArtifact;
@@ -119,12 +124,15 @@ export class ArtifactViewer implements Component {
 	private originalRead: ReturnType<typeof readTextFile> | undefined;
 	private cachedWidth: number | undefined;
 	private cachedLines: string[] | undefined;
+	private lastContentRows: RenderedViewerLine[] = [];
+	private lastContentWidth = 0;
+	private pendingFirstChangeScroll = false;
 
 	constructor(private readonly options: ArtifactViewerOptions) {
 		this.mode = options.artifact.kind === "proposal" && options.artifact.originalPath ? "diff" : "proposal";
 		this.proposalRead = readTextFile(options.artifact.absolutePath);
 		this.refreshOriginalRead();
-		if (this.mode === "diff") this.scrollOffset = this.firstChangeIndex();
+		if (this.mode === "diff") this.pendingFirstChangeScroll = true;
 	}
 
 	invalidate(): void {
@@ -157,6 +165,7 @@ export class ArtifactViewer implements Component {
 		else if (data === "w" || data === "W") {
 			this.wrap = !this.wrap;
 			this.scrollOffset = 0;
+			this.pendingFirstChangeScroll = this.mode === "diff";
 			this.awaitingAcceptConfirm = false;
 			this.notice = this.wrap ? "Wrapping enabled." : "Wrapping disabled.";
 			this.rerender();
@@ -177,7 +186,8 @@ export class ArtifactViewer implements Component {
 		this.mode = mode;
 		this.notice = undefined;
 		this.awaitingAcceptConfirm = false;
-		this.scrollOffset = mode === "diff" ? this.firstChangeIndex() : 0;
+		this.scrollOffset = 0;
+		this.pendingFirstChangeScroll = mode === "diff";
 		this.rerender();
 	}
 
@@ -216,7 +226,8 @@ export class ArtifactViewer implements Component {
 			this.proposalRead = readTextFile(this.options.artifact.absolutePath);
 			this.refreshOriginalRead();
 			this.mode = this.options.artifact.kind === "proposal" && this.options.artifact.originalPath ? "diff" : this.mode;
-			this.scrollOffset = this.mode === "diff" ? this.firstChangeIndex() : 0;
+			this.scrollOffset = 0;
+			this.pendingFirstChangeScroll = this.mode === "diff";
 			this.notice = message;
 		} catch (error) {
 			this.notice = `Accept failed: ${error instanceof Error ? error.message : String(error)}`;
@@ -231,16 +242,17 @@ export class ArtifactViewer implements Component {
 		this.setScroll(this.scrollOffset + delta);
 	}
 
-	private changedLineIndexes(): number[] {
-		return this.contentLines().map((line, index) => ({ line, index })).filter((item) => item.line.kind === "added" || item.line.kind === "removed").map((item) => item.index);
+	private changedLineIndexes(rows = this.lastContentRows): number[] {
+		return rows.map((line, index) => ({ line, index })).filter((item) => item.line.kind === "added" || item.line.kind === "removed").map((item) => item.index);
 	}
 
-	private firstChangeIndex(): number {
-		return this.changedLineIndexes()[0] ?? 0;
+	private firstChangeIndex(rows = this.lastContentRows): number {
+		return this.changedLineIndexes(rows)[0] ?? 0;
 	}
 
 	private jumpChange(delta: number): void {
-		const changes = this.changedLineIndexes();
+		const rows = this.lastContentRows.length > 0 ? this.lastContentRows : this.renderContentRows(this.lastContentWidth || 80);
+		const changes = this.changedLineIndexes(rows);
 		if (changes.length === 0) {
 			this.notice = "No changed lines in this diff.";
 			this.rerender();
@@ -268,11 +280,17 @@ export class ArtifactViewer implements Component {
 		const safeWidth = Math.max(30, width);
 		const innerWidth = Math.max(1, safeWidth - 2);
 		const bodyRows = this.bodyRows();
-		const content = this.renderContent(innerWidth);
+		const content = this.renderContentRows(innerWidth);
+		this.lastContentRows = content;
+		this.lastContentWidth = innerWidth;
 		const maxScroll = Math.max(0, content.length - bodyRows);
+		if (this.pendingFirstChangeScroll) {
+			this.scrollOffset = this.firstChangeIndex(content);
+			this.pendingFirstChangeScroll = false;
+		}
 		this.scrollOffset = Math.min(this.scrollOffset, maxScroll);
 		const visible = content.slice(this.scrollOffset, this.scrollOffset + bodyRows);
-		while (visible.length < bodyRows) visible.push("");
+		while (visible.length < bodyRows) visible.push({ kind: "raw", text: "" });
 		const scrollInfo = content.length > bodyRows ? ` ${this.scrollOffset + 1}-${Math.min(content.length, this.scrollOffset + bodyRows)}/${content.length}` : ` ${content.length}/${content.length}`;
 		const title = ` Artifact viewer ${scrollInfo} `;
 		const lines = [
@@ -282,7 +300,7 @@ export class ArtifactViewer implements Component {
 			this.boxed(this.finalPathLine(innerWidth), safeWidth),
 			...(this.notice ? [this.boxed(fg(this.options.theme, "warning", this.notice), safeWidth)] : []),
 			this.divider(safeWidth),
-			...visible.map((line) => this.boxed(line, safeWidth)),
+			...visible.map((line) => this.boxed(this.renderRenderedLine(line, innerWidth), safeWidth)),
 			this.divider(safeWidth),
 			this.boxed(this.footer(innerWidth), safeWidth),
 			this.bottomBorder(safeWidth),
@@ -318,7 +336,7 @@ export class ArtifactViewer implements Component {
 		return padLine(hints, width);
 	}
 
-	private renderContent(width: number): string[] {
+	private renderContentRows(width: number): RenderedViewerLine[] {
 		const lines = this.contentLines();
 		return lines.flatMap((line) => this.renderViewerLine(line, width));
 	}
@@ -343,11 +361,15 @@ export class ArtifactViewer implements Component {
 		return splitFileLines(content).map((line, index) => ({ kind: "raw", text: `${String(index + 1).padStart(5, " ")} │ ${line}` }));
 	}
 
-	private renderViewerLine(line: ViewerLine, width: number): string[] {
+	private renderViewerLine(line: ViewerLine, width: number): RenderedViewerLine[] {
+		if (!this.wrap) return [{ kind: line.kind, text: clampLine(line.text, width) }];
+		return wrapPlainLine(line.text, width).map((part) => ({ kind: line.kind, text: clampLine(part, width) }));
+	}
+
+	private renderRenderedLine(line: RenderedViewerLine, width: number): string {
 		const theme = this.options.theme;
 		const color = line.kind === "added" ? "success" : line.kind === "removed" ? "error" : line.kind === "header" ? "toolTitle" : line.kind === "error" ? "error" : line.kind === "muted" ? "muted" : "toolOutput";
-		if (!this.wrap) return [clampLine(fg(theme, color, line.text), width)];
-		return wrapPlainLine(line.text, width).map((part) => clampLine(fg(theme, color, part), width));
+		return clampLine(fg(theme, color, line.text), width);
 	}
 
 	private topBorder(width: number, title: string): string {

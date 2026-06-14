@@ -345,8 +345,9 @@ describe("blank-slate MVP foundations", () => {
 			viewer.handleInput("q");
 			assert.equal(closed, true);
 
-			const lateOriginal = Array.from({ length: 30 }, (_, index) => `same ${index}`).join("\n") + "\nold\n";
-			const lateProposal = Array.from({ length: 30 }, (_, index) => `same ${index}`).join("\n") + "\nnew\n";
+			const longWrappedContext = `same 0 ${"x".repeat(1000)}`;
+			const lateOriginal = [longWrappedContext, ...Array.from({ length: 29 }, (_, index) => `same ${index + 1}`), "old", ""].join("\n");
+			const lateProposal = [longWrappedContext, ...Array.from({ length: 29 }, (_, index) => `same ${index + 1}`), "new", ""].join("\n");
 			await fsp.writeFile(originalPath, lateOriginal);
 			await fsp.writeFile(proposalPath, lateProposal);
 			const lateViewer = new ArtifactViewer({
@@ -498,6 +499,8 @@ describe("blank-slate MVP foundations", () => {
 			await tools.get("agent_create_note").execute("tool-5", { name: "handoff", content: "Initial findings\nTODO: review api\n" }, undefined, undefined, { cwd });
 			assert.equal(await fsp.readFile(path.join(cwd, ".agents", "proposal-worker", "notes", "handoff.md"), "utf8"), "Initial findings\nTODO: review api\n");
 			assert.equal(fs.existsSync(path.join(cwd, ".agents", "notes", "handoff.md")), false);
+			const artifactListWithNote = await tools.get("agent_view_artifacts").execute("tool-5b", {}, undefined, undefined, { cwd });
+			assert.match(artifactListWithNote.content[0].text, /note .*handoff\.md/);
 			const notesList = await tools.get("agent_view_notes").execute("tool-6", {}, undefined, undefined, { cwd });
 			assert.match(notesList.content[0].text, /handoff\.md/);
 			const noteRead = await tools.get("agent_view_notes").execute("tool-7", { note: "handoff" }, undefined, undefined, { cwd });
