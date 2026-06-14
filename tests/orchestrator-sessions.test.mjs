@@ -121,6 +121,7 @@ describe("orchestrator sessions", () => {
 		assert.equal(normalized.toolPolicies.read, "deny");
 		assert.equal(normalized.toolPolicies.write, undefined);
 		assert.equal(normalized.childRunnerTools.includes("write"), false);
+		assert.equal(normalized.childRunnerTools.includes("bash"), true);
 		assert.equal(normalized.orchestrator.toolPolicies.write, undefined);
 		assert.equal(normalized.orchestrator.toolPolicies.bash, "allow");
 		assert.equal(normalized.orchestrator.runnerTools.includes("bash"), true);

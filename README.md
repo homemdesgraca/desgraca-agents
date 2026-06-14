@@ -106,7 +106,8 @@ Default worker behavior:
 
 - Read and search tools are allowed for workers.
 - Agent-only proposal, artifact, and note tools are allowed.
-- `bash` defaults to `ask`.
+- `bash` is exposed to worker agents when its policy is `allow` or `ask`; it defaults to `ask`.
+- Setting worker `bash` to `deny` removes it from worker subprocess tool access.
 - Generic built-in `write` and `edit` are not exposed to worker agents.
 
 Default orchestrator behavior:

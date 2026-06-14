@@ -25,7 +25,26 @@ describe("blank-slate MVP foundations", () => {
 		assert.equal(settings.toolPolicies.agent_create_note, "allow");
 		assert.equal(settings.toolPolicies.agent_edit_note, "allow");
 		assert.equal(settings.toolPolicies.agent_view_notes, "allow");
-		assert.deepEqual(settings.childRunnerTools, ["read", "grep", "find", "ls", "agent_write_proposal", "agent_edit_proposal", "agent_view_artifacts", "agent_create_note", "agent_edit_note", "agent_view_notes"]);
+		assert.deepEqual(settings.childRunnerTools, ["read", "grep", "find", "ls", "bash", "agent_write_proposal", "agent_edit_proposal", "agent_view_artifacts", "agent_create_note", "agent_edit_note", "agent_view_notes"]);
+	});
+
+	test("worker bash tool exposure follows the configured policy", async () => {
+		const { createDefaultSettings } = await importCompiled("src/settings/settings.js");
+		const { createAgentJob } = await importCompiled("src/agents/agent-job.js");
+		const { getRunnableTools } = await importCompiled("src/agents/agent-runner.js");
+		const cwd = await fsp.mkdtemp(path.join(os.tmpdir(), "agent-bash-tools-"));
+		try {
+			const job = createAgentJob(cwd, "bash worker", "check commands");
+			job.allowedTools = ["read"];
+			const settings = createDefaultSettings();
+			assert.equal(getRunnableTools(job, settings).includes("bash"), true);
+			settings.toolPolicies.bash = "allow";
+			assert.equal(getRunnableTools(job, settings).includes("bash"), true);
+			settings.toolPolicies.bash = "deny";
+			assert.equal(getRunnableTools(job, settings).includes("bash"), false);
+		} finally {
+			await fsp.rm(cwd, { recursive: true, force: true });
+		}
 	});
 
 	test("agent jobs are sanitized and isolated under .agents", async () => {
@@ -38,7 +57,7 @@ describe("blank-slate MVP foundations", () => {
 			assert.equal(job.readableRoot, path.resolve(cwd));
 			assert.equal(job.writableRoot, path.join(cwd, ".agents", "module-x-worker"));
 			assert.equal(job.status, "draft");
-			assert.deepEqual(job.allowedTools, ["read", "grep", "find", "ls", "agent_write_proposal", "agent_edit_proposal", "agent_view_artifacts", "agent_create_note", "agent_edit_note", "agent_view_notes"]);
+			assert.deepEqual(job.allowedTools, ["read", "grep", "find", "ls", "bash", "agent_write_proposal", "agent_edit_proposal", "agent_view_artifacts", "agent_create_note", "agent_edit_note", "agent_view_notes"]);
 		} finally {
 			await fsp.rm(cwd, { recursive: true, force: true });
 		}

@@ -43,9 +43,10 @@ async function ensureDirectory(dir: string): Promise<void> {
 	await fs.mkdir(dir, { recursive: true });
 }
 
-function getRunnableTools(job: AgentJob, settings: AgentExtensionSettings): string[] {
-	const configured = job.allowedTools.length > 0 ? job.allowedTools : settings.childRunnerTools;
-	return Array.from(new Set(configured)).filter((tool) => tool !== "write" && tool !== "edit" && settings.toolPolicies[tool] !== "deny");
+export function getRunnableTools(job: AgentJob, settings: AgentExtensionSettings): string[] {
+	const configured = new Set(job.allowedTools.length > 0 ? job.allowedTools : settings.childRunnerTools);
+	if ((settings.toolPolicies.bash ?? "ask") !== "deny") configured.add("bash");
+	return Array.from(configured).filter((tool) => tool !== "write" && tool !== "edit" && settings.toolPolicies[tool] !== "deny");
 }
 
 async function walkFiles(root: string, cwd: string, agentId: string): Promise<AgentArtifact[]> {
@@ -241,6 +242,7 @@ export class PiSubprocessAgentRunner implements AgentRunner {
 			"Use agent_edit_proposal when you need to derive a proposal from an existing project file with exact oldText/newText replacements. It reads the original, writes an isolated proposal, and never mutates the project file.",
 			"Use agent_view_artifacts to list current isolated artifacts or inspect a specific artifact/proposal diff. If you want to check your generated changes, inspect artifacts with that tool instead of reading the original project file and expecting it to be changed.",
 			"Use agent_create_note, agent_edit_note, and agent_view_notes when you need to record, revise, list, or read notes. The note tools manage note files for you.",
+			"The bash tool is available only when the worker bash policy is allow or ask in /agent-settings; ask mode requires user approval before the command runs.",
 			"The user will inspect proposals before applying anything to the real project.",
 			"If you need to change project code, create a proposal with agent_write_proposal or agent_edit_proposal instead of editing the main project directly.",
 			...(hasOrchestratorHandoff ? [

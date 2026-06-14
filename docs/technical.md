@@ -228,6 +228,8 @@ interface AgentExtensionSettings {
 }
 ```
 
+- `toolPolicies`: Per-tool policies for worker subprocesses. Worker `bash` is exposed when its policy is `allow` or `ask`, and removed when its policy is `deny`.
+- `childRunnerTools`: Base worker subprocess tool list. Normalization includes `bash` and agent-only tools while still excluding generic `write` and `edit`.
 - `agents.defaultModel`: When set to `"default"`, orchestrator-created workers use the same model as their source orchestrator session. When set to a specific model, they use that model.
 - `orchestrator.toolPolicies`: Per-tool policies for orchestrator subprocesses.
 - `orchestrator.runnerTools`: List of tools allowed in orchestrator subprocesses.

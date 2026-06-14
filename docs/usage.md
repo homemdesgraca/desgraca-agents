@@ -152,9 +152,11 @@ Orchestrator artifact suggestions appear in the selected artifact details. To fu
 
 Use `/agent-settings` to configure:
 
-- Worker tool policies (allow/ask/deny).
+- Worker tool policies (allow/ask/deny), including `bash`.
 - Orchestrator tool policies.
 - Default agent model for orchestrator-created workers.
+
+Worker `bash` is available to agents when set to `allow` or `ask`. In `ask` mode, each command requires approval before it runs. Setting worker `bash` to `deny` removes bash from the worker subprocess tool list.
 
 The default model setting determines which model orchestrator-created workers use:
 

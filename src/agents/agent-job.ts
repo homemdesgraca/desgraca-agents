@@ -139,7 +139,7 @@ export function createAgentJob(cwd: string, name: string, task: string, model?: 
 		task: task.trim(),
 		model,
 		status: "draft",
-		allowedTools: ["read", "grep", "find", "ls", "agent_write_proposal", "agent_edit_proposal", "agent_view_artifacts", "agent_create_note", "agent_edit_note", "agent_view_notes"],
+		allowedTools: ["read", "grep", "find", "ls", "bash", "agent_write_proposal", "agent_edit_proposal", "agent_view_artifacts", "agent_create_note", "agent_edit_note", "agent_view_notes"],
 		readableRoot: path.resolve(cwd),
 		writableRoot: getAgentWritableRoot(cwd, safeName),
 		logs: [

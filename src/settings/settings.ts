@@ -64,7 +64,7 @@ export const DEFAULT_ORCHESTRATOR_TOOL_POLICIES: Record<string, ToolPolicy> = {
 	orchestrator_view_notes: "allow",
 };
 
-export const DEFAULT_CHILD_RUNNER_TOOLS = ["read", "grep", "find", "ls", ...AGENT_ONLY_TOOL_NAMES];
+export const DEFAULT_CHILD_RUNNER_TOOLS = ["read", "grep", "find", "ls", "bash", ...AGENT_ONLY_TOOL_NAMES];
 export const DEFAULT_ORCHESTRATOR_RUNNER_TOOLS = ["read", "grep", "find", "ls", ...ORCHESTRATOR_TOOL_NAMES];
 
 function withoutGenericMutationTools(tools: string[]): string[] {
@@ -101,7 +101,7 @@ export function normalizeAgentExtensionSettings(saved: Partial<AgentExtensionSet
 		...defaults,
 		...saved,
 		toolPolicies: workerPolicies,
-		childRunnerTools: withoutGenericMutationTools([...(saved.childRunnerTools ?? defaults.childRunnerTools), ...AGENT_ONLY_TOOL_NAMES]),
+		childRunnerTools: withoutGenericMutationTools([...(saved.childRunnerTools ?? defaults.childRunnerTools), "bash", ...AGENT_ONLY_TOOL_NAMES]),
 		agents: {
 			...defaults.agents,
 			...(saved.agents ?? {}),
