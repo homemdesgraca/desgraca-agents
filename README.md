@@ -1,6 +1,6 @@
 # desgraca-agents
 
-`desgraca-agents` is a pi extension for supervising isolated, task-scoped worker agents from a dedicated TUI dashboard.
+`desgraca-agents` is a [pi](https://pi.dev/) extension for supervising isolated, task-scoped worker agents from a dedicated TUI dashboard.
 
 It is built around user control. Workers can read the current project, but their output stays under their own `.agents/{AGENT_NAME}` workspace until you review and accept it.
 
