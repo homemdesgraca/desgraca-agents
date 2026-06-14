@@ -1,39 +1,114 @@
 # desgraca-agents
 
-`desgraca-agents` is a pi extension for supervising task-scoped agent jobs from a dedicated, themed TUI dashboard.
+`desgraca-agents` is a pi extension for supervising isolated, task-scoped worker agents from a dedicated TUI dashboard.
+
+It is built around user control. Workers can read the current project, but their output stays under their own `.agents/{AGENT_NAME}` workspace until you review and accept it.
+
+## What it provides
+
+- A full `/agents` dashboard for creating, starting, aborting, clearing, deleting, and inspecting agent jobs.
+- Isolated worker workspaces under `.agents/{AGENT_NAME}`.
+- Proposal-based code changes that are reviewed before being applied.
+- Agent notes for plans, findings, and handoff details.
+- Agent-scoped permission settings that do not affect normal parent-session tool calls.
 
 ## Commands
 
-- `/agents` opens the agent dashboard in TUI mode.
-- `/agent-settings` opens agent-scoped permission policy settings.
-- `/agent-policy-cycle <tool>` cycles one agent-scoped tool policy between `allow`, `ask`, and `deny`.
+- `/agents`: Open the agent dashboard. Requires TUI mode.
+- `/agent-settings`: Open agent-scoped permission policy settings.
+- `/agent-policy-cycle <tool>`: Cycle one agent tool policy between `allow`, `ask`, and `deny`.
 
-## Dashboard UI and keys
+## Dashboard keys
 
-The `/agents` screen uses a tall bordered, theme-aware dashboard with an agent list pane, agent description pane, mode tabs, and wrapped footer hints. Press `H` for descriptive help that explains what each dashboard mode shows.
+### Modes
 
-- `G` show AGENTS mode, `T` show TRACKING, `P` show APPROVALS, `F` show ARTIFACTS, and `H` show HELP. `Q` and `E` walk backward/forward through those modes.
-- `1`-`9` select an agent job in every dashboard mode.
-- `Up` / `Down` scroll the right-hand panel when there is more content than visible space.
-- AGENTS mode: `C` creates a new job, `S` starts it, `X` aborts it, `K` clears selected-agent output after confirmation, and `Delete` or `Backspace` deletes it after confirmation. Starting an already-started agent suggests clearing it first.
-- TRACKING mode: `M` sends a follow-up message to the selected agent, including after it is `FINISHED`.
-- APPROVALS mode: `A` approves and `N` denies the first pending approval.
-- ARTIFACTS mode: `[` and `]` move between visible artifacts/notes, `O` or `Enter` opens a large artifact viewer, `V` hides or shows notes, and `R` refreshes artifact discovery.
-- Artifact viewer: wrapping is enabled by default. `Up` / `Down` scroll, `PageUp` / `PageDown` jump between changed lines in diff view, `A` starts a two-step accept flow for proposal artifacts, `D` shows diff for proposal artifacts, `P` shows the proposal/raw artifact, `O` shows the original file for proposal artifacts, `W` toggles wrapping, and `Q` or `Esc` closes the viewer. The viewer shows both the artifact path and the final path that will be created or changed when accepted.
-- `Esc` closes the dashboard.
+- `G`: AGENTS mode.
+- `T`: TRACKING mode.
+- `P`: APPROVALS mode.
+- `F`: ARTIFACTS mode.
+- `H` or `?`: HELP mode.
+- `Q` / `E`: Walk backward or forward through modes.
+- `Esc` or `Ctrl-C`: Close the dashboard.
+
+### Job management
+
+In AGENTS mode:
+
+- `C`: Create a job.
+- `S`: Start the selected job.
+- `X`: Abort the selected running job.
+- `K`: Clear selected-agent output after confirmation.
+- `Delete` or `Backspace`: Delete the selected job after confirmation.
+- `1`-`9`: Select an agent job.
+
+### Tracking and approvals
+
+- `M`: Send a follow-up message in TRACKING mode.
+- `A`: Approve the first pending tool approval in APPROVALS mode.
+- `N`: Deny the first pending tool approval in APPROVALS mode.
+- `Up` / `Down`: Scroll the right-hand panel when needed.
+
+### Artifacts
+
+In ARTIFACTS mode:
+
+- `[` / `]`: Move between visible artifacts and notes.
+- `O` or `Enter`: Open the selected artifact.
+- `V`: Hide or show note artifacts.
+- `R`: Refresh artifact discovery.
+
+In the artifact viewer:
+
+- `D`: Show a diff for proposal artifacts.
+- `P`: Show proposal or raw artifact content.
+- `O`: Show the original file for proposal artifacts.
+- `A`: Start proposal acceptance. Press `A` again to confirm.
+- `W`: Toggle wrapping.
+- `PageUp` / `PageDown`: Jump between changed lines in diff view, or page through raw content.
+- `Q` or `Esc`: Close the viewer.
 
 ## Workspace rule
 
-Each job may read from the current pi working directory. Job-owned writable output and persisted dashboard state belong under:
+Each job may read from the current pi working directory. Writable output and persisted dashboard state are stored under:
 
 ```text
 .agents/{AGENT_NAME}
 ```
 
-Each workspace includes `agent-job.json`, which persists the job metadata, logs, approvals, artifacts, selected model, and final response so jobs survive reopening `/agents` or starting a new pi session. Worker agents may read/search the main project and use agent-only tools to create reviewable proposals, inspect artifacts, and manage per-agent notes. Project-file change proposals are written under `.agents/{AGENT_NAME}/proposals/{ORIGINAL_PATH}`, mirroring the original project structure. Agent notes are stored under `.agents/{AGENT_NAME}/notes` by the note tools and appear as `notes` entries in ARTIFACTS mode. Generated work is not applied automatically; accepting a proposal from the artifact viewer requires an explicit two-step user action.
+Common workspace paths:
 
-## Permission defaults
+- `agent-job.json`: Persisted job metadata, logs, approvals, artifacts, selected model, and final response.
+- `proposals/{ORIGINAL_PATH}`: Reviewable project-file proposals.
+- `notes/{NAME}.md`: Agent notes created by note tools.
 
-These permission policies are agent-scoped only. `desgraca-agents` does not intercept or approve normal plain-LLM tool calls in the parent pi session; those should remain owned by your regular approval extensions or pi configuration.
+Generated work is not applied automatically. A proposal is written back to the project only after you accept it from the artifact viewer.
 
-For marked agent subprocesses, read/search tools are allowed by default. The agent-only `agent_write_proposal`, `agent_edit_proposal`, `agent_view_artifacts`, `agent_create_note`, `agent_edit_note`, and `agent_view_notes` tools are allowed by default. Proposal tools write only isolated proposals under the worker workspace, `agent_view_artifacts` lets workers list current artifacts or inspect a specific artifact/proposal diff, and note tools let workers create, edit, list, and read per-agent notes. These agent-only tools are registered only inside marked agent subprocesses, so ordinary parent pi conversations cannot see or call them. Generic built-in `write` and `edit` are not exposed to worker agents. `bash` remains a policy-controlled sensitive tool if enabled. Simple bash warnings are surfaced for patterns such as `rm`, `curl`, `wget`, `sudo`, `chmod`, `chown`, `kill`, and shell redirection.
+## Permissions
+
+Permission policies are agent-scoped only. This extension does not intercept normal tool calls in the parent pi session.
+
+Default behavior:
+
+- Read and search tools are allowed for workers.
+- Agent-only proposal, artifact, and note tools are allowed.
+- `bash` defaults to `ask`.
+- Generic built-in `write` and `edit` are not exposed to worker agents.
+
+Simple warnings are shown for risky bash patterns such as `rm`, `curl`, `wget`, `sudo`, `chmod`, `chown`, `kill`, and shell redirection.
+
+## Typical usage
+
+1. Open `/agents`.
+2. Create a focused job with `C`.
+3. Start the selected worker with `S`.
+4. Watch progress in TRACKING mode.
+5. Review proposals and notes in ARTIFACTS mode.
+6. Open a proposal, inspect the diff, and press `A` twice if you want to apply it.
+7. Send follow-up instructions with `M` when more work is needed.
+
+## More documentation
+
+- [Overview](docs/overview.md)
+- [Architecture](docs/architecture.md)
+- [Usage guide](docs/usage.md)
+- [Technical reference](docs/technical.md)
