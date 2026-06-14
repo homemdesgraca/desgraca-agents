@@ -106,6 +106,12 @@ Simple warnings are shown for risky bash patterns such as `rm`, `curl`, `wget`, 
 6. Open a proposal, inspect the diff, and press `A` twice if you want to apply it.
 7. Send follow-up instructions with `M` when more work is needed.
 
+## TODO
+
+Future features to implement:
+
+- Optional main orchestrator that can suggest or create separated jobs automatically, while still requiring user approval before workers run.
+
 ## More documentation
 
 - [Overview](docs/overview.md)
