@@ -517,6 +517,10 @@ export class Dashboard implements Component {
 					clampLine(`Final path: ${artifact.originalPath ?? "(review-only artifact; no accept target)"}`, rightWidth),
 					clampLine(`Type: ${artifact.kind === "proposal" ? "proposal" : artifact.kind === "note" ? "note" : "artifact"}`, rightWidth),
 					clampLine(`Size: ${artifact.sizeBytes} bytes`, rightWidth),
+					...(artifact.suggestions?.length ? [
+						clampLine(`Suggestions: ${artifact.suggestions.length}. Press Enter to open this artifact, then S to inspect suggestions.`, rightWidth),
+						clampLine("In the viewer, press A twice to fuse the selected suggestion into this artifact.", rightWidth),
+					] : []),
 				] : []),
 			];
 		} else if (this.mode === "help") {

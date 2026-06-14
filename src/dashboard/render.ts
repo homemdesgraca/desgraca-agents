@@ -301,7 +301,7 @@ export function renderArtifacts(job: AgentJob | undefined, width: number, theme?
 	if (artifacts.length === 0) return [clampLine(fg(theme, "dim", "No visible artifacts. Notes are hidden; press V to show them."), width)];
 	return artifacts.flatMap((artifact, index) => [
 		formatArtifact(artifact, index, width, theme, index === selectedIndex),
-		...(artifact.suggestions ?? []).map((suggestion) => clampLine(`    ${fg(theme, "accent", "suggestion")} ${fg(theme, "text", suggestion.summary || suggestion.path)} ${fg(theme, "dim", `from ${suggestion.orchestratorTitle ?? suggestion.orchestratorSessionId}`)}`, width)),
+		...(artifact.suggestions ?? []).map((suggestion) => clampLine(`    ${fg(theme, "accent", "suggestion")} ${fg(theme, "text", suggestion.summary || suggestion.path)} ${fg(theme, "dim", `from ${suggestion.orchestratorTitle ?? suggestion.orchestratorSessionId}; Enter artifact, then S`)}`, width)),
 	]);
 }
 
@@ -383,15 +383,11 @@ export function renderFooterHints(width: number, theme?: Theme, mode: DashboardM
 			`${key(theme, "M")} message`,
 			`${key(theme, "N")} deny`,
 			`${key(theme, "↑/↓")} scroll`,
-			`${key(theme, "PgUp/PgDn")} top/bottom`,
-			`${key(theme, "L")} auto-scroll`,
 		],
 		logs: [
 			`${key(theme, "1-9")} select agent`,
 			`${key(theme, "M")} message`,
 			`${key(theme, "↑/↓")} scroll`,
-			`${key(theme, "PgUp/PgDn")} top/bottom`,
-			`${key(theme, "L")} auto-scroll`,
 		],
 		approvals: [
 			`${key(theme, "1-9")} select agent`,

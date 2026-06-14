@@ -206,6 +206,7 @@ describe("blank-slate MVP foundations", () => {
 			assert.match(renderApprovals(job, 100).join("\n"), /Warning: rm detected/);
 			assert.match(renderArtifacts(job, 100).join("\n"), /original: notes\.md/);
 			assert.match(renderArtifacts(job, 100).join("\n"), /suggestion.*review suggestion/);
+			assert.match(renderArtifacts(job, 100).join("\n"), /Enter artifact, then S/);
 			assert.match(renderArtifacts(job, 100).join("\n"), /notes.*handoff\.md/);
 			assert.doesNotMatch(renderArtifacts(job, 100, undefined, 0, { showNotes: false }).join("\n"), /handoff\.md/);
 			assert.match(renderArtifactContent(job.artifacts[0], 100).join("\n"), /line two/);
@@ -236,8 +237,9 @@ describe("blank-slate MVP foundations", () => {
 			assert.match(renderFooterHints(120, undefined, "artifacts").join("\n"), /V.*notes/);
 			assert.doesNotMatch(renderFooterHints(120, undefined, "normal").join("\n"), /approve|deny/);
 			assert.match(renderFooterHints(120, undefined, "normal").join("\n"), /K clear/);
-			assert.match(renderFooterHints(120, undefined, "logs").join("\n"), /L.*auto-scroll/);
-			assert.match(renderFooterHints(120, undefined, "logs").join("\n"), /PgUp\/PgDn.*top\/bottom/);
+			assert.doesNotMatch(renderFooterHints(120, undefined, "logs").join("\n"), /L.*auto-scroll/);
+			assert.doesNotMatch(renderFooterHints(120, undefined, "logs").join("\n"), /PgUp\/PgDn.*top\/bottom/);
+			assert.doesNotMatch(renderFooterHints(120, undefined, "orchestrator").join("\n"), /PgUp\/PgDn.*top\/bottom/);
 			assert.match(renderFooterHints(120, undefined, "approvals").join("\n"), /approve/);
 		} finally {
 			await fsp.rm(cwd, { recursive: true, force: true });
