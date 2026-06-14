@@ -3,6 +3,7 @@ import { matchesKey } from "@earendil-works/pi-tui";
 export type DashboardAction =
 	| { type: "close" }
 	| { type: "create" }
+	| { type: "createThread" }
 	| { type: "clear" }
 	| { type: "select"; index: number }
 	| { type: "start" }
@@ -38,6 +39,7 @@ export function parseDashboardAction(input: string): DashboardAction | undefined
 	if (input === "q" || input === "Q") return { type: "previousMode" };
 	if (input === "e" || input === "E") return { type: "nextMode" };
 	if (input === "c" || input === "C") return { type: "create" };
+	if (input === "b" || input === "B") return { type: "createThread" };
 	if (input === "k" || input === "K") return { type: "clear" };
 	if (input >= "1" && input <= "9") return { type: "select", index: Number(input) - 1 };
 	if (input === "s" || input === "S") return { type: "start" };

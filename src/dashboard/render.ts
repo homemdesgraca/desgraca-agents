@@ -299,7 +299,10 @@ export function renderArtifacts(job: AgentJob | undefined, width: number, theme?
 	if (job.artifacts.length === 0) return [clampLine(fg(theme, "dim", "No artifacts found under the job workspace."), width)];
 	const artifacts = visibleArtifacts(job, options);
 	if (artifacts.length === 0) return [clampLine(fg(theme, "dim", "No visible artifacts. Notes are hidden; press V to show them."), width)];
-	return artifacts.map((artifact, index) => formatArtifact(artifact, index, width, theme, index === selectedIndex));
+	return artifacts.flatMap((artifact, index) => [
+		formatArtifact(artifact, index, width, theme, index === selectedIndex),
+		...(artifact.suggestions ?? []).map((suggestion) => clampLine(`    ${fg(theme, "accent", "suggestion")} ${fg(theme, "text", suggestion.summary || suggestion.path)} ${fg(theme, "dim", `from ${suggestion.orchestratorTitle ?? suggestion.orchestratorSessionId}`)}`, width)),
+	]);
 }
 
 function formatArtifact(artifact: AgentArtifact, index: number, width: number, theme: Theme | undefined, selected: boolean): string {
@@ -370,6 +373,7 @@ export function renderFooterHints(width: number, theme?: Theme, mode: DashboardM
 		],
 		orchestrator: [
 			`${key(theme, "C")} create`,
+			`${key(theme, "B")} new thread`,
 			`${key(theme, "1-9")} select session`,
 			`${key(theme, "S")} start/approve`,
 			`${key(theme, "I")} edit`,
@@ -426,7 +430,7 @@ export function renderHelp(width: number, theme?: Theme): string[] {
 		"",
 		heading("Dashboard modes"),
 		`${key(theme, "Agents mode")} shows the selected agent's identity, status, readable root, writable root, allowed tools, model, task, final response preview, process state, and recent logs.`,
-		`${key(theme, "Orchestrator mode")} shows orchestrator sessions, the active plan, ordered worker drafts, pending start requests, wait state, and recent transcript. It follows AGENTS-style controls: ${key(theme, "C")} creates a session, ${key(theme, "S")} approves/starts a pending request, ${key(theme, "I")} edits title/model, ${key(theme, "X")} aborts a running orchestrator, ${key(theme, "K")} clears session state, and ${key(theme, "Del/Backspace")} deletes the session. Use ${key(theme, "M")} to message the orchestrator and ${key(theme, "N")} to deny start requests.`,
+		`${key(theme, "Orchestrator mode")} shows orchestrator sessions/threads, the active plan, ordered worker drafts, pending start requests, wait state, and recent transcript. It follows AGENTS-style controls: ${key(theme, "C")} creates an orchestrator, ${key(theme, "B")} creates a fresh conversation thread under the selected orchestrator, ${key(theme, "S")} approves/starts a pending request, ${key(theme, "I")} edits title/model, ${key(theme, "X")} aborts a running orchestrator, ${key(theme, "K")} clears session state, and ${key(theme, "Del/Backspace")} deletes the session. Use ${key(theme, "M")} to message the selected thread and ${key(theme, "N")} to deny start requests.`,
 
 		`${key(theme, "Tracking mode")} auto-scrolls as work arrives until you manually scroll or press ${key(theme, "L")} to disable it. It shows user messages, worker responses, status changes, artifact-writing guidance, and compact tool activity; noisy read/search tool input and output are hidden. Use ${key(theme, "M")} to keep talking to a finished worker.`,
 		`${key(theme, "Approvals mode")} shows pending sensitive tool requests for the selected agent, including tool name, input summary, policy reason, and simple risk warnings.`,

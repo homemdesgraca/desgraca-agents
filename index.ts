@@ -5,6 +5,7 @@ import { getSettingsListTheme, withFileMutationQueue } from "@earendil-works/pi-
 import { Container, type SettingItem, SettingsList, Text } from "@earendil-works/pi-tui";
 import { AGENT_SETTINGS_ENV, getAgentProcessEnvContext } from "./src/agents/agent-env.ts";
 import type { AgentArtifact, AgentJob, AgentModelSelection } from "./src/agents/agent-job.ts";
+import { applyArtifactSuggestion } from "./src/agents/artifact-suggestions.ts";
 import { AgentStore } from "./src/agents/agent-store.ts";
 import { discoverArtifacts, PiSubprocessAgentRunner } from "./src/agents/agent-runner.ts";
 import { registerAgentProposalTools } from "./src/agents/proposal-tools.ts";
@@ -30,6 +31,12 @@ const SETTINGS_ENTRY = "desgraca-agents-settings";
 
 function normalizeSettings(saved: Partial<AgentExtensionSettings> = {}): AgentExtensionSettings {
 	return normalizeAgentExtensionSettings(saved);
+}
+
+export async function acceptArtifactSuggestion(job: AgentJob, artifact: AgentArtifact, suggestionId: string): Promise<string> {
+	const suggestion = artifact.suggestions?.find((item) => item.id === suggestionId);
+	if (!suggestion) throw new Error(`Unknown artifact suggestion: ${suggestionId}`);
+	return applyArtifactSuggestion(job, suggestion);
 }
 
 export async function acceptArtifactProposal(job: AgentJob, artifact: AgentArtifact): Promise<string> {
@@ -358,6 +365,13 @@ export default function desgracaAgentsExtension(pi: ExtensionAPI) {
 										store.appendTracking(acceptedJob.id, { kind: "status", title: "Artifact accepted", message: `${message}\nSource artifact: ${acceptedArtifact.path}` });
 										return message;
 									},
+									onAcceptSuggestion: async (acceptedJob, acceptedArtifact, suggestionId) => {
+										const message = await acceptArtifactSuggestion(acceptedJob, acceptedArtifact, suggestionId);
+										store.appendLog(acceptedJob.id, `${message} Source artifact: ${acceptedArtifact.path}`);
+										store.appendTracking(acceptedJob.id, { kind: "status", title: "Artifact suggestion accepted", message: `${message}\nSource artifact: ${acceptedArtifact.path}` });
+										store.setArtifacts(acceptedJob.id, await discoverArtifacts(acceptedJob));
+										return message;
+									},
 								}),
 								{
 									overlay: true,
@@ -411,8 +425,29 @@ export default function desgracaAgentsExtension(pi: ExtensionAPI) {
 								_tui.requestRender();
 								return;
 							}
-							const session = await orchestratorStore.create(ctx.cwd, { title: result.title, model: result.model });
-							if (result.initialPrompt) await orchestratorRunner.send(session.id, result.initialPrompt);
+							await orchestratorStore.create(ctx.cwd, { title: result.title, model: result.model });
+							_tui.requestRender();
+						},
+						createOrchestratorThread: async (sessionId) => {
+							const modelOptions = getCreatableAgentModels(ctx);
+							const result = await ctx.ui.custom<CreateOrchestratorSessionDialogResult | undefined>(
+								(dialogTui, dialogTheme, _dialogKeybindings, dialogDone) => new CreateOrchestratorSessionDialog(dialogTui, dialogTheme, dialogDone, modelOptions),
+								{
+									overlay: true,
+									overlayOptions: {
+										anchor: "center",
+										width: "86%",
+										minWidth: 54,
+										maxHeight: "70%",
+										margin: 2,
+									},
+								},
+							);
+							if (!result) {
+								_tui.requestRender();
+								return;
+							}
+							await orchestratorStore.createThread(sessionId, { title: result.title, model: result.model });
 							_tui.requestRender();
 						},
 						sendOrchestratorMessage: async (sessionId) => {
@@ -467,7 +502,12 @@ export default function desgracaAgentsExtension(pi: ExtensionAPI) {
 						refreshOrchestratorState: async () => {
 							await orchestratorStore.refresh();
 							await orchestratorStore.syncAllDrafts(settings);
-						},
+							for (const job of store.list()) {
+								try {
+									store.setArtifacts(job.id, await discoverArtifacts(job));
+								} catch {}
+							}
+						}, 
 						denyOrchestratorStartRequest: async (sessionId, requestId) => {
 							const requests = await orchestratorStore.listStartRequests(sessionId);
 							const request = requests.find((item) => item.id === requestId);

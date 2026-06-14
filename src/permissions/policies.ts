@@ -32,6 +32,9 @@ export function summarizeToolInput(toolName: string, input: unknown): string {
 	if (toolName === "orchestrator_request_start_agent" || toolName === "orchestrator_get_agent_details") {
 		return `${String(data.name ?? "")} wait=${String(data.waitForResponse ?? false)}`.slice(0, 180);
 	}
+	if (toolName === "orchestrator_suggest_artifact_edit") {
+		return `${String(data.agentName ?? "")} ${String(data.artifactPath ?? "")}`.slice(0, 180);
+	}
 	if (toolName === "grep") return `${String(data.pattern ?? "")} in ${String(data.path ?? ".")}`.slice(0, 180);
 	if (toolName === "find") return `${String(data.pattern ?? "*")} in ${String(data.path ?? ".")}`.slice(0, 180);
 	try {

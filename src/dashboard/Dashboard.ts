@@ -39,6 +39,7 @@ export interface DashboardActions {
 	sendMessage(job: AgentJob): Promise<void>;
 	openArtifactViewer(job: AgentJob, artifact: AgentArtifact): Promise<void>;
 	createOrchestratorSession?(): Promise<void>;
+	createOrchestratorThread?(sessionId: string): Promise<void>;
 	sendOrchestratorMessage?(sessionId: string): Promise<void>;
 	approveOrchestratorStartRequest?(sessionId: string, requestId: string): Promise<void>;
 	denyOrchestratorStartRequest?(sessionId: string, requestId: string): Promise<void>;
@@ -172,6 +173,17 @@ export class Dashboard implements Component {
 				}
 				if (!this.requireMode("normal", "Create is available in AGENTS mode. Press G first.")) break;
 				await this.actions.createJob();
+				break;
+			case "createThread":
+				if (!this.requireMode("orchestrator", "Thread creation is available in ORCHESTRATOR mode. Press O first.")) break;
+				{
+					const sessionId = this.orchestratorStore?.getSelectedId();
+					if (!sessionId) this.showNotice("Create or select an orchestrator first.", "warning");
+					else {
+						await this.actions.createOrchestratorThread?.(sessionId);
+						await this.refreshOrchestratorSnapshot();
+					}
+				}
 				break;
 			case "clear":
 				if (this.mode === "orchestrator") {

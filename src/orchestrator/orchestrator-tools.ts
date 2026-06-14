@@ -4,6 +4,8 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { AgentStore } from "../agents/agent-store.ts";
+import { createArtifactSuggestion } from "../agents/artifact-suggestions.ts";
+import { discoverArtifacts } from "../agents/agent-runner.ts";
 import { sanitizeAgentName } from "../agents/agent-job.ts";
 import { isPathInside } from "../permissions/scope-guard.ts";
 import { createDefaultSettings, normalizeAgentExtensionSettings } from "../settings/settings.ts";
@@ -97,6 +99,7 @@ function formatAgentDetails(draft: any, job: any): string {
 	if (!draft && !job) return "No matching draft or agent found.";
 	const pendingApprovals = job?.pendingApprovals?.filter?.((approval: any) => approval.status === "pending") ?? [];
 	const artifacts = job?.artifacts ?? [];
+	const artifactLines = artifacts.slice(0, 12).map((artifact: any) => `- ${artifact.path}${artifact.originalPath ? ` (original: ${artifact.originalPath})` : ""}${artifact.suggestions?.length ? ` suggestions:${artifact.suggestions.length}` : ""}`).join("\n");
 	const logs = (job?.logs ?? []).slice(-6).map((log: any) => `${new Date(log.timestamp).toLocaleTimeString()} ${log.level}: ${log.message}`).join("\n");
 	const tracking = (job?.tracking ?? []).slice(-6).map((entry: any) => `${new Date(entry.timestamp).toLocaleTimeString()} ${entry.title}: ${entry.message ?? ""}`).join("\n");
 	return [
@@ -107,6 +110,7 @@ function formatAgentDetails(draft: any, job: any): string {
 		`Task: ${job?.task ?? draft?.task ?? ""}`,
 		`Pending approvals: ${pendingApprovals.length}`,
 		`Artifacts: ${artifacts.length}`,
+		artifactLines ? `Artifact paths for suggestions/review:\n${artifactLines}` : "Artifact paths for suggestions/review: (none)",
 		job?.finalResponse ? `Final response:\n${truncateText(job.finalResponse, 8000)}` : "Final response: (not available)",
 		logs ? `Recent logs:\n${logs}` : "Recent logs: (none)",
 		tracking ? `Recent tracking:\n${tracking}` : "Recent tracking: (none)",
@@ -228,6 +232,47 @@ export function registerOrchestratorTools(pi: ExtensionAPI): void {
 			const draft = drafts.find((item) => sanitizeAgentName(item.name) === safeName);
 			const job = draft?.agentJobId ? agentStore.get(draft.agentJobId) : agentStore.list().find((item) => sanitizeAgentName(item.name) === safeName);
 			return toolText(formatAgentDetails(draft, job), { draft, jobId: job?.id });
+		},
+	});
+
+	pi.registerTool({
+		name: "orchestrator_suggest_artifact_edit",
+		label: "Orchestrator Suggest Artifact Edit",
+		description: "Create a review-only replacement suggestion attached to a worker artifact. It does not edit the artifact or project; the user may accept it from ARTIFACTS mode.",
+		promptSnippet: "Suggest a replacement for a worker artifact without mutating it",
+		promptGuidelines: [
+			"Use orchestrator_get_agent_details first and copy an artifact path from 'Artifact paths for suggestions/review'.",
+			"For proposal artifacts, artifactPath may be either the displayed .agents/... proposal path or the original project-relative path shown as '(original: ...)'.",
+			"Provide the full replacement content for the target artifact, not a patch fragment.",
+			"Never assume the suggestion has been applied until the user accepts it from ARTIFACTS mode.",
+		],
+		parameters: Type.Object({
+			agentName: Type.String({ description: "Worker agent name." }),
+			artifactPath: Type.String({ description: "Target artifact path. Prefer copying the .agents/... path from orchestrator_get_agent_details. For proposals, the original project-relative path is also accepted." }),
+			content: Type.String({ description: "Full replacement content for the artifact if accepted by the user." }),
+			summary: Type.Optional(Type.String({ description: "Short summary shown under the artifact." })),
+		}),
+		async execute(_toolCallId, params) {
+			const { context, agentStore, orchestratorStore } = await createStores();
+			const safeName = sanitizeAgentName(params.agentName);
+			const job = agentStore.list().find((item) => item.name === safeName || sanitizeAgentName(item.name) === safeName);
+			if (!job) throw new Error(`Unknown worker agent: ${params.agentName}`);
+			const artifacts = await discoverArtifacts(job);
+			agentStore.setArtifacts(job.id, artifacts);
+			const refreshedJob = agentStore.get(job.id) ?? { ...job, artifacts };
+			const session = orchestratorStore.get(context.sessionId);
+			const suggestion = await createArtifactSuggestion(refreshedJob, {
+				artifactPath: params.artifactPath,
+				content: params.content,
+				summary: params.summary,
+				orchestratorSessionId: context.sessionId,
+				orchestratorTitle: session?.orchestratorTitle ?? session?.title,
+			});
+			const artifactsWithSuggestion = await discoverArtifacts(refreshedJob);
+			agentStore.setArtifacts(job.id, artifactsWithSuggestion);
+			await agentStore.persistAll();
+			await orchestratorStore.appendTranscript(context.sessionId, { kind: "tool", title: "Artifact suggestion created", toolName: "orchestrator_suggest_artifact_edit", message: `${job.name}: ${suggestion.artifactPath}`, output: params.summary });
+			return toolText(`Created suggestion for ${suggestion.artifactPath}. The artifact and main project were not modified.`, { suggestion });
 		},
 	});
 

@@ -296,9 +296,13 @@ export class AgentStore {
 		};
 	}
 
-	private persistAllSoon(): void {
+	async persistAll(): Promise<void> {
 		if (!this.persistenceCwd) return;
-		void Promise.all([...this.jobs.values()].map((job) => this.persistJob(job))).catch(() => undefined);
+		await Promise.all([...this.jobs.values()].map((job) => this.persistJob(job)));
+	}
+
+	private persistAllSoon(): void {
+		void this.persistAll().catch(() => undefined);
 	}
 
 	private async persistJob(job: AgentJob): Promise<void> {

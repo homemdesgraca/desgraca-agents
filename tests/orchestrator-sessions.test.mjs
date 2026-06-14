@@ -15,6 +15,7 @@ describe("orchestrator sessions", () => {
 		const { renderOrchestratorRight } = await importCompiled("src/dashboard/render-orchestrator.js");
 		assert.deepEqual(parseDashboardAction("O"), { type: "orchestrator" });
 		assert.deepEqual(parseDashboardAction("o"), { type: "orchestrator" });
+		assert.deepEqual(parseDashboardAction("B"), { type: "createThread" });
 		const modes = ["normal", "orchestrator", "logs", "approvals", "artifacts", "help"];
 		for (const mode of modes) {
 			const footer = renderFooterHints(160, undefined, mode).join("\n");
@@ -24,6 +25,7 @@ describe("orchestrator sessions", () => {
 		}
 		const orchestratorFooter = renderFooterHints(160, undefined, "orchestrator").join("\n");
 		assert.match(orchestratorFooter, /C.*create/);
+		assert.match(orchestratorFooter, /B.*new thread/);
 		assert.match(orchestratorFooter, /S.*start\/approve/);
 		assert.match(orchestratorFooter, /I.*edit/);
 		assert.match(orchestratorFooter, /X.*abort/);
@@ -53,12 +55,18 @@ describe("orchestrator sessions", () => {
 
 	test("orchestrator clear and delete dialogs confirm or cancel explicitly", async () => {
 		const { ClearOrchestratorSessionDialog } = await importCompiled("src/dashboard/clear-orchestrator-session-dialog.js");
+		const { CreateOrchestratorSessionDialog } = await importCompiled("src/dashboard/create-orchestrator-session-dialog.js");
 		const { DeleteOrchestratorSessionDialog } = await importCompiled("src/dashboard/delete-orchestrator-session-dialog.js");
 		const theme = {
 			fg: (_color, text) => text,
 			bg: (_color, text) => text,
 			bold: (text) => text,
 		};
+		const created = [];
+		const createDialog = new CreateOrchestratorSessionDialog({ requestRender: () => undefined }, theme, (result) => created.push(result), []);
+		assert.doesNotMatch(createDialog.render(90).join("\n"), /Initial prompt/);
+		assert.match(createDialog.render(90).join("\n"), /press M/i);
+
 		const session = {
 			id: "session-1",
 			title: "Planning session",
@@ -183,7 +191,15 @@ describe("orchestrator sessions", () => {
 			const session = await store.create(cwd, { title: " Build plan ", model, initialPlan: "initial plan" });
 			assert.equal(store.getSelectedId(), session.id);
 			assert.equal(session.title, "Build plan");
+			assert.equal(session.orchestratorId, session.id);
+			assert.equal(session.threadTitle, "Main");
 			assert.equal(await store.readPlan(session.id), "initial plan");
+			const reviewThread = await store.createThread(session.id, { title: "Review artifacts" });
+			assert.equal(reviewThread.orchestratorId, session.id);
+			assert.equal(reviewThread.orchestratorTitle, "Build plan");
+			assert.equal(reviewThread.threadTitle, "Review artifacts");
+			assert.equal(store.getSelectedId(), reviewThread.id);
+			store.select(session.id);
 
 			await store.writePlan(session.id, "# Current plan\n\n- draft workers");
 			await store.appendTranscript(session.id, { kind: "user", title: "User", message: "Plan the work" });
@@ -373,6 +389,7 @@ describe("orchestrator sessions", () => {
 			});
 			assert.ok(tools.has("orchestrator_update_plan"));
 			assert.ok(tools.has("orchestrator_create_agent_draft"));
+			assert.ok(tools.has("orchestrator_suggest_artifact_edit"));
 			assert.equal(tools.has("agent_write_proposal"), false);
 			assert.equal(tools.has("write"), false);
 
@@ -387,6 +404,13 @@ describe("orchestrator sessions", () => {
 			assert.match(statusResult.content[0].text, /tool-worker/);
 			const detailsResult = await tools.get("orchestrator_get_agent_details").execute("details", { name: "Tool Worker" });
 			assert.match(detailsResult.content[0].text, /Agent status: draft/);
+			await fsp.mkdir(path.join(cwd, ".agents", "tool-worker", "notes"), { recursive: true });
+			await fsp.writeFile(path.join(cwd, ".agents", "tool-worker", "notes", "review.md"), "original note", "utf8");
+			const suggestionResult = await tools.get("orchestrator_suggest_artifact_edit").execute("suggest", { agentName: "Tool Worker", artifactPath: path.join(".agents", "tool-worker", "notes", "review.md"), content: "suggested note", summary: "improve note" });
+			assert.match(suggestionResult.content[0].text, /Created suggestion/);
+			assert.equal(await fsp.readFile(path.join(cwd, ".agents", "tool-worker", "notes", "review.md"), "utf8"), "original note");
+			const persistedJob = JSON.parse(await fsp.readFile(path.join(cwd, ".agents", "tool-worker", "agent-job.json"), "utf8"));
+			assert.equal(persistedJob.artifacts[0].suggestions[0].summary, "improve note");
 			const requestResult = await tools.get("orchestrator_request_start_agent").execute("start", { name: "Tool Worker", waitForResponse: false });
 			assert.match(requestResult.content[0].text, /Start request created/);
 

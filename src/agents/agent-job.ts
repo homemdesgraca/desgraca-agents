@@ -36,6 +36,19 @@ export interface AgentApproval {
 	resolvedAt?: number;
 }
 
+export interface AgentArtifactSuggestion {
+	id: string;
+	artifactPath: string;
+	path: string;
+	absolutePath: string;
+	sizeBytes: number;
+	updatedAt: number;
+	createdAt: number;
+	orchestratorSessionId: string;
+	orchestratorTitle?: string;
+	summary?: string;
+}
+
 export interface AgentArtifact {
 	id: string;
 	agentId: string;
@@ -45,6 +58,7 @@ export interface AgentArtifact {
 	updatedAt: number;
 	kind?: "artifact" | "proposal" | "note";
 	originalPath?: string;
+	suggestions?: AgentArtifactSuggestion[];
 }
 
 export interface AgentModelSelection {
