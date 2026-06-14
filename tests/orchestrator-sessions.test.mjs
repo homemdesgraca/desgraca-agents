@@ -255,6 +255,15 @@ describe("orchestrator sessions", () => {
 			const second = await store.createOrUpdateDraft(session.id, { name: "Concrete", task: "concrete model task", order: 3 }, setDefaultAgentModel(createDefaultSettings(), concreteModel));
 			assert.deepEqual(second.job?.model, concreteModel);
 
+			const deletedDraft = await store.createOrUpdateDraft(session.id, { name: "Delete Me", task: "temporary worker", order: 6 }, createDefaultSettings());
+			await store.createStartRequest(session.id, { name: "Delete Me", waitForResponse: false });
+			await store.removeLinkedAgent(session.id, deletedDraft.job.id, deletedDraft.draft.id);
+			await agentStore.delete(deletedDraft.job.id);
+			await store.syncAllDrafts(createDefaultSettings());
+			assert.equal(agentStore.list().some((job) => job.name === "delete-me"), false);
+			assert.equal((await store.listDrafts(session.id)).some((draft) => draft.name === "delete-me"), false);
+			assert.equal((await store.listStartRequests(session.id)).some((request) => request.agentName === "delete-me"), false);
+
 			await Promise.all([
 				store.createOrUpdateDraft(session.id, { name: "Concurrent A", task: "first concurrent task", order: 4 }, createDefaultSettings()),
 				store.createOrUpdateDraft(session.id, { name: "Concurrent B", task: "second concurrent task", order: 5 }, createDefaultSettings()),

@@ -18,6 +18,8 @@ export interface AgentRunner {
 interface RunningProcess {
 	process: ChildProcess;
 	aborted: boolean;
+	artifactTimer?: ReturnType<typeof setInterval>;
+	artifactRefreshInFlight?: boolean;
 }
 
 function stringifyCompact(value: unknown): string | undefined {
@@ -160,7 +162,11 @@ export class PiSubprocessAgentRunner implements AgentRunner {
 				[AGENT_SETTINGS_ENV]: JSON.stringify(settings),
 			},
 		});
-		this.running.set(jobId, { process: child, aborted: false });
+		const runningState: RunningProcess = { process: child, aborted: false };
+		runningState.artifactTimer = setInterval(() => void this.refreshArtifactsWhileRunning(jobId), 1500);
+		runningState.artifactTimer.unref?.();
+		this.running.set(jobId, runningState);
+		void this.refreshArtifactsWhileRunning(jobId);
 		this.store.update(jobId, (current) => ({ ...current, process: { ...current.process, pid: child.pid } }));
 
 		let stdoutBuffer = "";
@@ -201,6 +207,7 @@ export class PiSubprocessAgentRunner implements AgentRunner {
 		child.on("close", async (code, signal) => {
 			if (stdoutBuffer.trim()) processJsonLine(stdoutBuffer);
 			const running = this.running.get(jobId);
+			if (running?.artifactTimer) clearInterval(running.artifactTimer);
 			this.running.delete(jobId);
 			const nextStatus = running?.aborted ? "aborted" : code === 0 ? "done" : "failed";
 			this.store.update(jobId, (current) => ({
@@ -249,7 +256,27 @@ export class PiSubprocessAgentRunner implements AgentRunner {
 		].join("\n");
 	}
 
+	private async refreshArtifactsWhileRunning(jobId: string): Promise<void> {
+		const running = this.running.get(jobId);
+		if (!running || running.artifactRefreshInFlight) return;
+		const job = this.store.get(jobId);
+		if (!job) {
+			if (running.artifactTimer) clearInterval(running.artifactTimer);
+			this.running.delete(jobId);
+			return;
+		}
+		running.artifactRefreshInFlight = true;
+		try {
+			this.store.setArtifacts(jobId, await discoverArtifacts(job));
+		} catch (error) {
+			this.store.appendLog(jobId, `Artifact refresh failed: ${error instanceof Error ? error.message : String(error)}`, "warning");
+		} finally {
+			running.artifactRefreshInFlight = false;
+		}
+	}
+
 	private recordToolEvent(jobId: string, event: Record<string, any>): void {
+		void this.refreshArtifactsWhileRunning(jobId);
 		const toolName = String(event.toolName ?? event.name ?? event.tool?.name ?? "tool");
 		const phase = String(event.type ?? "tool event").replace(/_/g, " ");
 		const input = stringifyCompact(event.input ?? event.args ?? event.toolInput ?? event.params ?? event.tool?.input);
@@ -272,6 +299,7 @@ export class PiSubprocessAgentRunner implements AgentRunner {
 			return;
 		}
 		running.aborted = true;
+		void this.refreshArtifactsWhileRunning(jobId);
 		this.store.setStatus(jobId, "aborted");
 		this.store.appendLog(jobId, "Abort requested by user.", "warning");
 		running.process.kill("SIGTERM");

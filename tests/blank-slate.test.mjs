@@ -112,7 +112,9 @@ describe("blank-slate MVP foundations", () => {
 
 	test("artifact discovery only reports files from the agent workspace", async () => {
 		const { createAgentJob } = await importCompiled("src/agents/agent-job.js");
-		const { discoverArtifacts } = await importCompiled("src/agents/agent-runner.js");
+		const { AgentStore } = await importCompiled("src/agents/agent-store.js");
+		const { discoverArtifacts, PiSubprocessAgentRunner } = await importCompiled("src/agents/agent-runner.js");
+		const { createDefaultSettings } = await importCompiled("src/settings/settings.js");
 		const cwd = await fsp.mkdtemp(path.join(os.tmpdir(), "artifacts-"));
 		try {
 			const job = createAgentJob(cwd, "artifact worker", "produce notes");
@@ -132,6 +134,17 @@ describe("blank-slate MVP foundations", () => {
 			assert.equal(artifacts[1].sizeBytes, 5);
 			assert.equal(artifacts[1].kind, "proposal");
 			assert.equal(artifacts[1].originalPath, path.join("nested", "notes.md"));
+			assert.equal(artifacts.some((artifact) => artifact.path.includes("agent-job.json")), false);
+
+			const store = new AgentStore();
+			const liveJob = store.create(cwd, "live artifacts", "watch files");
+			const runner = new PiSubprocessAgentRunner(store, createDefaultSettings);
+			runner.running.set(liveJob.id, { process: { killed: false }, aborted: false });
+			await fsp.mkdir(path.join(liveJob.writableRoot, "notes"), { recursive: true });
+			await fsp.writeFile(path.join(liveJob.writableRoot, "notes", "live.md"), "live note");
+			await runner.refreshArtifactsWhileRunning(liveJob.id);
+			assert.ok(store.get(liveJob.id).artifacts.some((artifact) => artifact.path.endsWith(path.join("notes", "live.md"))));
+			runner.running.delete(liveJob.id);
 		} finally {
 			await fsp.rm(cwd, { recursive: true, force: true });
 		}

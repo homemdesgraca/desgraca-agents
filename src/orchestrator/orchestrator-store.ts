@@ -210,6 +210,24 @@ export class OrchestratorStore {
 		return true;
 	}
 
+	async removeLinkedAgent(sessionId: string, agentJobId: string, draftId?: string): Promise<void> {
+		const session = this.sessions.get(sessionId);
+		if (!session) return;
+		const drafts = await this.readDraftsRaw(session);
+		const removedDrafts = drafts.filter((draft) => draft.agentJobId === agentJobId || (!!draftId && draft.id === draftId));
+		if (removedDrafts.length > 0) {
+			const removedDraftIds = new Set(removedDrafts.map((draft) => draft.id));
+			await this.writeDraftsRaw(session, drafts.filter((draft) => !removedDraftIds.has(draft.id) && draft.agentJobId !== agentJobId));
+		}
+		const removedNames = new Set(removedDrafts.map((draft) => sanitizeAgentName(draft.name)));
+		const requests = await this.listStartRequests(sessionId);
+		const nextRequests = requests.filter((request) => request.agentJobId !== agentJobId && !(request.draftId && draftId && request.draftId === draftId) && !removedNames.has(sanitizeAgentName(request.agentName)));
+		if (nextRequests.length !== requests.length) await this.saveStartRequests(sessionId, nextRequests);
+		const waitingFor = session.waitingFor?.agentJobId === agentJobId || (draftId && session.waitingFor?.requestId && requests.some((request) => request.id === session.waitingFor?.requestId && request.draftId === draftId)) ? undefined : session.waitingFor;
+		await this.updateSession(sessionId, { updatedAt: now(), waitingFor });
+		await this.appendTranscript(sessionId, { kind: "status", title: "Linked agent removed", message: `Removed deleted linked agent ${agentJobId} from orchestrator drafts and start requests.` });
+	}
+
 	async appendTranscript(sessionId: string, entry: Omit<OrchestratorTranscriptEntry, "id" | "timestamp">): Promise<OrchestratorTranscriptEntry | undefined> {
 		const session = this.sessions.get(sessionId);
 		if (!session) return undefined;

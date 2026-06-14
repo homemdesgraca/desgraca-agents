@@ -581,6 +581,7 @@ export default function desgracaAgentsExtension(pi: ExtensionAPI) {
 								_tui.requestRender();
 								return false;
 							}
+							if (job.source?.kind === "orchestrator") await orchestratorStore.removeLinkedAgent(job.source.sessionId, job.id, job.source.draftId);
 							const deleted = await store.delete(job.id);
 							_tui.requestRender();
 							return deleted;
