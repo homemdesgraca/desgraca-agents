@@ -15,6 +15,7 @@ The dashboard shows an agent list on the left and mode-specific details on the r
 Use direct mode keys to switch views:
 
 - `G`: **AGENTS** mode for job management.
+- `O`: **ORCHESTRATOR** mode for planning sessions and worker drafts.
 - `T`: **TRACKING** mode for worker progress, messages, tool events, and final responses.
 - `P`: **APPROVALS** mode for pending agent-scoped tool approvals.
 - `F`: **ARTIFACTS** mode for proposals, notes, and generated files.
@@ -27,6 +28,7 @@ Use direct mode keys to switch views:
 In **AGENTS** mode:
 
 - `C`: Create a new job.
+- `I`: Edit a draft job's name, task, and model.
 - `S`: Start the selected job.
 - `X`: Abort the selected running job.
 - `K`: Clear selected-agent output after confirmation.
@@ -35,12 +37,50 @@ In **AGENTS** mode:
 
 A job that has already produced output cannot be started again from a blank state until it is cleared. Use **TRACKING** mode to continue it with a follow-up message instead.
 
+## Orchestrator mode
+
+In **ORCHESTRATOR** mode, you manage planning sessions that coordinate worker agents:
+
+- `C`: Create a new orchestrator session with a title, optional initial prompt, and model picker.
+- `M`: Send a message to the active orchestrator session.
+- `B`: Create a fresh conversation thread under the selected orchestrator for context-free discussion.
+- `1`-`9`: Select an orchestrator session.
+- `S` or `Enter`: Approve a pending orchestrator start request through confirmation.
+- `N`: Deny a pending orchestrator start request through confirmation.
+- `I`: Edit the active orchestrator session title and model.
+- `X`: Abort the active running orchestrator session.
+- `K`: Clear the active orchestrator session's plan, transcript, drafts, and start requests without deleting linked worker jobs.
+- `Delete` or `Backspace`: Delete the active orchestrator session without deleting linked worker jobs.
+- `↑` / `↓`: Scroll the orchestrator detail panel.
+
+The orchestrator can:
+
+- Update the session plan.
+- Create ordered worker drafts with only `name`, `task`, and `order`.
+- Request that a worker start.
+- List worker statuses and get details for specific workers.
+- Create and edit session notes.
+- Suggest artifact edits (review-only suggestions attached to worker artifacts).
+
+The orchestrator cannot directly edit project files, approve worker tool calls, or apply artifacts. Worker starts require explicit user approval.
+
+## Start request flow
+
+When an orchestrator requests to start a worker:
+
+1. A pending start request appears in ORCHESTRATOR mode.
+2. Press `S` or `Enter` to approve, or `N` to deny.
+3. On approval, the worker starts through the normal parent runner.
+4. On denial, the request is marked denied and the worker does not start.
+
+You can approve start requests from either ORCHESTRATOR mode or APPROVALS mode.
+
 ## Tracking and follow-up messages
 
 In **TRACKING** mode:
 
 - `M`: Send a follow-up message to the selected agent.
-- `Up` / `Down`: Scroll the right-hand panel.
+- `↑` / `↓`: Scroll the right-hand panel.
 
 Tracking entries summarize worker starts, user messages, tool calls, errors, and final responses.
 
@@ -58,10 +98,10 @@ Approvals are for policy-controlled tool calls, such as sensitive commands. They
 In **ARTIFACTS** mode:
 
 - `[` / `]`: Move between visible artifacts and notes.
-- `O` or `Enter`: Open the selected artifact in the large viewer.
+- `Enter`: Open the selected artifact in the large viewer.
 - `V`: Hide or show note artifacts.
 - `R`: Refresh artifact discovery.
-- `Up` / `Down`: Scroll the right-hand panel.
+- `↑` / `↓`: Scroll the right-hand panel.
 
 The artifact viewer supports:
 
@@ -70,11 +110,16 @@ The artifact viewer supports:
 - `O`: Show the original file for proposal artifacts.
 - `A`: Start proposal acceptance. Press `A` again to confirm.
 - `W`: Toggle wrapping.
-- `Up` / `Down`: Scroll.
 - `PageUp` / `PageDown`: Jump between changed lines in diff view, or page through raw content.
 - `Q` or `Esc`: Close the viewer.
 
 Only proposal artifacts with a final project path can be accepted. Notes and general artifacts are review-only.
+
+Orchestrator artifact suggestions appear in the selected artifact details. To fuse a suggestion:
+
+1. Open the artifact with `Enter`.
+2. Press `S` to inspect suggestions.
+3. Select the suggestion and press `A` twice to fuse it into the artifact.
 
 ## Typical workflow
 
@@ -85,3 +130,30 @@ Only proposal artifacts with a final project path can be accepted. Notes and gen
 5. Review generated proposals and notes in **ARTIFACTS** mode.
 6. Open a proposal, inspect the diff, and press `A` twice in the artifact viewer if you want to apply it.
 7. Use `M` in **TRACKING** mode to send follow-up instructions when more work is needed.
+
+## Orchestrator workflow
+
+1. Open `/agents` and press `O` to enter ORCHESTRATOR mode.
+2. Press `C` to create a new orchestrator session with a title and model.
+3. Press `M` to send an initial prompt or wait for the orchestrator to respond.
+4. Ask the orchestrator to create worker drafts with specific tasks and order.
+5. Switch to **AGENTS** mode to review the drafted workers.
+6. Edit worker models or tasks if needed using `I`.
+7. Return to ORCHESTRATOR mode and ask it to start the first worker.
+8. Approve the start request with `S`.
+9. Monitor progress in **TRACKING** mode.
+10. When the first worker completes, ask the orchestrator to start the next worker.
+11. Review artifacts and proposals as they are generated.
+
+## Settings
+
+Use `/agent-settings` to configure:
+
+- Worker tool policies (allow/ask/deny).
+- Orchestrator tool policies.
+- Default agent model for orchestrator-created workers.
+
+The default model setting determines which model orchestrator-created workers use:
+
+- `default`: Uses the same model as the orchestrator session.
+- A specific model: Uses that model for all orchestrator-created workers unless overridden.

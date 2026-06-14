@@ -11,6 +11,15 @@ Workers must not directly write to the main project tree. Project changes are re
 
 Each workspace also contains `agent-job.json`, which persists job metadata, logs, tracking entries, approvals, artifacts, selected model, and final response.
 
+## Orchestrator isolation model
+
+The orchestrator operates in a dedicated isolation model to separate high-level planning from low-level agent execution:
+
+- **Workspace**: Orchestrator sessions and their associated data are stored in `.agents/_orchestrator/`.
+- **Session Isolation**: Each session has its own directory for its `plan.md`, `transcript.jsonl`, `drafts.json`, `start-requests.json`, and `notes/`.
+- **Tool Isolation**: Orchestrators are restricted to a specific set of orchestration tools. They cannot directly mutate project files, approve worker tool calls, or apply artifacts.
+- **Persistence**: Session data is persisted atomically to disk, ensuring that state (like the current plan or drafted workers) survives between turns and subprocess runs.
+
 ## Agent execution
 
 Workers run as isolated pi subprocesses in JSON mode. The dashboard starts subprocesses with the project root as the current working directory and passes agent context through environment variables, including the job id, agent name, writable root, and current settings.
