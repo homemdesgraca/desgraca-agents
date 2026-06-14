@@ -153,7 +153,7 @@ export function registerOrchestratorTools(pi: ExtensionAPI): void {
 		label: "Orchestrator Create Agent Draft",
 		description: "Create or update an ordered worker draft with only name, task, and order.",
 		promptSnippet: "Create or update a worker draft",
-		promptGuidelines: ["Only provide worker name, task, and order.", "Do not include model or permission profile; the user controls those in AGENTS mode."],
+		promptGuidelines: ["Only provide worker name, task, and order.", "Use the same order for workers that can run in parallel as a user-started group.", "Do not include model or permission profile; the user controls those in AGENTS mode."],
 		parameters: Type.Object({
 			name: Type.String({ description: "Worker name." }),
 			task: Type.String({ description: "Worker task." }),

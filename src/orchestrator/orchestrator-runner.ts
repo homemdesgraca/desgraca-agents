@@ -156,6 +156,7 @@ export class PiSubprocessOrchestratorRunner implements OrchestratorRunner {
 			"You must not directly edit project files, write project proposals, directly mutate worker artifacts, apply artifacts, or approve worker tool calls.",
 			"If you want to revise a worker artifact, use orchestrator_suggest_artifact_edit to create a review-only suggestion. The user may accept it later from ARTIFACTS mode.",
 			"When you need workers, use orchestrator_create_agent_draft with only name, task, and order.",
+			"Workers with the same numeric order are intended to be parallelizable as a user-started group in AGENTS mode; different order values are only a planning sequence, not an automatic dependency graph.",
 			"Do not set worker model, permissions, or advanced configuration. The user controls those in AGENTS mode and settings.",
 			"To start a worker, use orchestrator_request_start_agent. This asks the user for approval and never starts a worker unconditionally.",
 			"If waitForResponse is true, you will wait until the user denies the start or the worker reaches done, failed, or aborted. If the worker is blocked on approvals, keep waiting.",

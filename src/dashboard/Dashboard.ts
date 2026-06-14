@@ -1,5 +1,6 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { Component } from "@earendil-works/pi-tui";
+import { buildAgentListView, buildGroupStartPlan, findParallelGroupForJob, type AgentParallelGroup } from "../agents/agent-groups.ts";
 import type { AgentArtifact, AgentJob } from "../agents/agent-job.ts";
 import type { AgentStore } from "../agents/agent-store.ts";
 import { discoverArtifacts, type AgentRunner } from "../agents/agent-runner.ts";
@@ -18,7 +19,7 @@ import {
 	renderHeader,
 	renderHelp,
 	renderJobDetails,
-	renderJobList,
+	renderAgentListView,
 	renderLogs,
 	renderModeTabs,
 	renderSectionTitle,
@@ -47,6 +48,7 @@ export interface DashboardActions {
 	clearOrchestratorSession?(sessionId: string): Promise<boolean>;
 	deleteOrchestratorSession?(sessionId: string): Promise<boolean>;
 	refreshOrchestratorState?(): Promise<void>;
+	startAgentGroup?(group: AgentParallelGroup): Promise<{ started: number; skipped: number; cancelled?: boolean }>;
 }
 
 const MODE_ORDER: DashboardMode[] = ["normal", "orchestrator", "logs", "approvals", "artifacts", "help"];
@@ -130,7 +132,9 @@ export class Dashboard implements Component {
 				this.orchestratorStore?.selectByIndex(action.index);
 				void this.refreshOrchestratorSnapshot();
 			} else {
-				this.store.selectByIndex(action.index);
+				const view = buildAgentListView(this.store.list());
+				const job = view.selectableJobs[action.index];
+				if (job) this.store.select(job.id);
 			}
 			this.artifactPreviewIndex = 0;
 			this.rightScrollOffset = 0;
@@ -214,6 +218,29 @@ export class Dashboard implements Component {
 				if (!job) this.showNotice("Create or select a job first.", "warning");
 				else if (this.agentHasStartedOutput(job)) this.showNotice("This agent has already been started. Clear it first with K if you want to run it from a blank state.", "warning");
 				else await this.runner.start(job.id);
+				break;
+			case "groupStart":
+				if (!this.requireMode("normal", "Group start is available in AGENTS mode. Press G first.")) break;
+				if (!job) {
+					this.showNotice("Create or select a job first.", "warning");
+					break;
+				}
+				if (job.source?.kind !== "orchestrator") {
+					this.showNotice("Selected agent is not from an orchestrator group.", "warning");
+					break;
+				}
+				{
+					const group = findParallelGroupForJob(this.store.list(), job);
+					if (!group) {
+						this.showNotice("Selected agent has no parallel group. Use S to start it individually.", "warning");
+						break;
+					}
+					buildGroupStartPlan(group, (jobId) => this.runner.isRunning(jobId));
+					const result = await this.actions.startAgentGroup?.(group);
+					if (!result || result.cancelled) break;
+					const level = result.started > 0 ? "info" : "warning";
+					this.showNotice(`Started ${result.started} agents. Skipped ${result.skipped}.`, level);
+				}
 				break;
 			case "abort":
 				if (this.mode === "orchestrator") {
@@ -433,7 +460,7 @@ export class Dashboard implements Component {
 	}
 
 	private agentHasStartedOutput(job: AgentJob): boolean {
-		return !!job.startedAt || !!job.finalResponse || !!job.process || job.artifacts.length > 0 || job.pendingApprovals.length > 0 || job.status !== "draft";
+		return buildGroupStartPlan({ key: { sessionId: job.source?.sessionId ?? "manual", order: job.source?.order ?? 0 }, jobs: [job], label: job.name, isParallel: false }, (jobId) => this.runner.isRunning(jobId)).skipped.length > 0;
 	}
 
 	private async refreshArtifacts(job: AgentJob | undefined): Promise<void> {
@@ -465,6 +492,7 @@ export class Dashboard implements Component {
 		if (this.cachedLines && this.cachedWidth === width) return this.cachedLines;
 		const safeWidth = Math.max(20, width);
 		const jobs = this.store.list();
+		const agentListView = buildAgentListView(jobs);
 		const selected = this.store.getSelected();
 		const selectedId = selected?.id;
 		const theme = this.theme;
@@ -484,7 +512,7 @@ export class Dashboard implements Component {
 
 		const left = this.mode === "orchestrator"
 			? renderOrchestratorLeft(this.orchestratorStore?.list() ?? [], this.orchestratorStore?.getSelectedId(), this.orchestratorSnapshot, jobs, leftWidth, theme)
-			: [renderSectionTitle("Agents", leftWidth, theme), ...renderJobList(jobs, selectedId, leftWidth, theme)];
+			: [renderSectionTitle("Agents", leftWidth, theme), ...renderAgentListView(agentListView, selectedId, leftWidth, theme)];
 		let rightTitleText: string;
 		let right: string[];
 		if (this.mode === "orchestrator") {

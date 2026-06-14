@@ -6,6 +6,7 @@ import { Container, type SettingItem, SettingsList, Text } from "@earendil-works
 import { AGENT_SETTINGS_ENV, getAgentProcessEnvContext } from "./src/agents/agent-env.ts";
 import type { AgentArtifact, AgentJob, AgentModelSelection } from "./src/agents/agent-job.ts";
 import { applyArtifactSuggestion } from "./src/agents/artifact-suggestions.ts";
+import { buildGroupStartPlan, findGroupForJob, type AgentParallelGroup } from "./src/agents/agent-groups.ts";
 import { AgentStore } from "./src/agents/agent-store.ts";
 import { discoverArtifacts, PiSubprocessAgentRunner } from "./src/agents/agent-runner.ts";
 import { registerAgentProposalTools } from "./src/agents/proposal-tools.ts";
@@ -22,6 +23,7 @@ import { Dashboard } from "./src/dashboard/Dashboard.ts";
 import { DeleteAgentDialog } from "./src/dashboard/delete-agent-dialog.ts";
 import { DeleteOrchestratorSessionDialog } from "./src/dashboard/delete-orchestrator-session-dialog.ts";
 import { EditOrchestratorSessionDialog, type EditOrchestratorSessionDialogResult } from "./src/dashboard/edit-orchestrator-session-dialog.ts";
+import { StartAgentGroupDialog } from "./src/dashboard/start-agent-group-dialog.ts";
 import { TrackingMessageDialog } from "./src/dashboard/tracking-message-dialog.ts";
 import { decideOrchestratorToolPolicy, decideToolPolicy } from "./src/permissions/policies.ts";
 import { checkAgentReadScope, checkAgentWriteScope, isPathInside } from "./src/permissions/scope-guard.ts";
@@ -406,6 +408,48 @@ export default function desgracaAgentsExtension(pi: ExtensionAPI) {
 							}
 							await runner.send(job.id, message);
 						},
+						startAgentGroup: async (group: AgentParallelGroup) => {
+							const latestRepresentative = store.list().find((job) => job.source?.kind === "orchestrator" && job.source.sessionId === group.key.sessionId && job.source.order === group.key.order);
+							const latestGroup = findGroupForJob(store.list(), latestRepresentative) ?? group;
+							const initialPlan = buildGroupStartPlan(latestGroup, (jobId) => runner.isRunning(jobId));
+							const confirmed = await ctx.ui.custom<boolean>(
+								(_dialogTui, dialogTheme, _dialogKeybindings, dialogDone) => new StartAgentGroupDialog(initialPlan, dialogTheme, dialogDone),
+								{
+									overlay: true,
+									overlayOptions: {
+										anchor: "center",
+										width: "90%",
+										minWidth: 60,
+										maxHeight: "80%",
+										margin: 2,
+									},
+								},
+							);
+							if (!confirmed) {
+								_tui.requestRender();
+								return { started: 0, skipped: initialPlan.skipped.length, cancelled: true };
+							}
+
+							let started = 0;
+							let skipped = initialPlan.skipped.length;
+							for (const planned of initialPlan.runnable) {
+								const latest = store.get(planned.id);
+								if (!latest) {
+									skipped += 1;
+									continue;
+								}
+								const recheck = buildGroupStartPlan({ ...initialPlan.group, jobs: [latest] }, (jobId) => runner.isRunning(jobId));
+								if (recheck.runnable.length === 0) {
+									skipped += 1;
+									continue;
+								}
+								if (latest.source?.kind === "orchestrator") await writeOrchestratorHandoffNote(latest, store.list());
+								await runner.start(latest.id);
+								started += 1;
+							}
+							_tui.requestRender();
+							return { started, skipped };
+						}, 
 						createOrchestratorSession: async () => {
 							const modelOptions = getCreatableAgentModels(ctx);
 							const result = await ctx.ui.custom<CreateOrchestratorSessionDialogResult | undefined>(

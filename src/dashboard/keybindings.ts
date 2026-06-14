@@ -7,6 +7,7 @@ export type DashboardAction =
 	| { type: "clear" }
 	| { type: "select"; index: number }
 	| { type: "start" }
+	| { type: "groupStart" }
 	| { type: "abort" }
 	| { type: "approve" }
 	| { type: "deny" }
@@ -43,6 +44,7 @@ export function parseDashboardAction(input: string): DashboardAction | undefined
 	if (input === "k" || input === "K") return { type: "clear" };
 	if (input >= "1" && input <= "9") return { type: "select", index: Number(input) - 1 };
 	if (input === "s" || input === "S") return { type: "start" };
+	if (input === "u" || input === "U") return { type: "groupStart" };
 	if (input === "x" || input === "X") return { type: "abort" };
 	if (input === "m" || input === "M") return { type: "message" };
 	if (input === "i" || input === "I") return { type: "edit" };

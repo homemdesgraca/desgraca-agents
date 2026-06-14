@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { buildAgentListView, type AgentListView } from "../agents/agent-groups.ts";
 import type { AgentApproval, AgentArtifact, AgentJob } from "../agents/agent-job.ts";
 
 export type DashboardMode = "normal" | "orchestrator" | "logs" | "approvals" | "artifacts" | "help";
@@ -165,19 +166,31 @@ export function renderModeTabs(active: DashboardMode, width: number, theme?: The
 	return packTokens(tabs, width, " ").map((line) => padLine(line, width));
 }
 
-export function renderJobList(jobs: AgentJob[], selectedId: string | undefined, width: number, theme?: Theme): string[] {
-	if (jobs.length === 0) return [clampLine(fg(theme, "dim", "No agent jobs yet. Press C to create one."), width)];
-	return jobs.map((job, index) => {
-		const selected = job.id === selectedId;
-		const pointer = selected ? fg(theme, "accent", ">") : fg(theme, "dim", " ");
-		const number = fg(theme, selected ? "accent" : "dim", `${index + 1}.`);
-		const approvalCount = job.pendingApprovals.filter((approval) => approval.status === "pending").length;
-		const approvals = approvalCount > 0 ? ` ${fg(theme, "warning", `approvals:${approvalCount}`)}` : "";
-		const artifacts = fg(theme, "dim", `artifacts:${job.artifacts.length}`);
-		const source = job.source?.kind === "orchestrator" ? ` ${fg(theme, "accent", `ord:${job.source.order}`)}` : "";
-		const row = `${pointer} ${number} ${fg(theme, selected ? "text" : "muted", job.name)} ${fg(theme, "dim", "[")}${formatStatusLabel(job.status, theme)}${fg(theme, "dim", "]")} ${artifacts}${approvals}${source}`;
-		return selected ? bg(theme, "selectedBg", padLine(row, width)) : clampLine(row, width);
+function renderJobListRow(job: AgentJob, selected: boolean, numberValue: number, width: number, theme?: Theme): string {
+	const pointer = selected ? fg(theme, "accent", ">") : fg(theme, "dim", " ");
+	const number = fg(theme, selected ? "accent" : "dim", `${numberValue}.`);
+	const approvalCount = job.pendingApprovals.filter((approval) => approval.status === "pending").length;
+	const approvals = approvalCount > 0 ? ` ${fg(theme, "warning", `approvals:${approvalCount}`)}` : "";
+	const artifacts = fg(theme, "dim", `artifacts:${job.artifacts.length}`);
+	const source = job.source?.kind === "orchestrator" ? ` ${fg(theme, "accent", `ord:${job.source.order}`)}` : "";
+	const row = `${pointer} ${number} ${fg(theme, selected ? "text" : "muted", job.name)} ${fg(theme, "dim", "[")}${formatStatusLabel(job.status, theme)}${fg(theme, "dim", "]")} ${artifacts}${approvals}${source}`;
+	return selected ? bg(theme, "selectedBg", padLine(row, width)) : clampLine(row, width);
+}
+
+export function renderAgentListView(view: AgentListView, selectedId: string | undefined, width: number, theme?: Theme): string[] {
+	if (view.selectableJobs.length === 0) return [clampLine(fg(theme, "dim", "No agent jobs yet. Press C to create one."), width)];
+	return view.items.flatMap((item) => {
+		if (item.kind === "section") return [clampLine(fg(theme, "toolTitle", bold(theme, item.title)), width)];
+		if (item.kind === "group") {
+			const title = item.isParallel ? fg(theme, "warning", bold(theme, item.title)) : fg(theme, "dim", item.title);
+			return [clampLine(`  ${title}`, width)];
+		}
+		return [renderJobListRow(item.job, item.job.id === selectedId, item.selectableIndex, width, theme)];
 	});
+}
+
+export function renderJobList(jobs: AgentJob[], selectedId: string | undefined, width: number, theme?: Theme): string[] {
+	return renderAgentListView(buildAgentListView(jobs), selectedId, width, theme);
 }
 
 function renderField(label: string, value: string, width: number, theme?: Theme): string[] {
@@ -366,6 +379,7 @@ export function renderFooterHints(width: number, theme?: Theme, mode: DashboardM
 			`${key(theme, "C")} create`,
 			`${key(theme, "1-9")} select agent`,
 			`${key(theme, "S")} start`,
+			`${key(theme, "U")} group start`,
 			`${key(theme, "I")} edit`,
 			`${key(theme, "X")} abort`,
 			`${key(theme, "K")} clear`,
@@ -421,11 +435,11 @@ export function renderHelp(width: number, theme?: Theme): string[] {
 		"",
 		heading("Job actions"),
 		`${key(theme, "C")} creates a task-scoped agent job in AGENTS mode. Opens an empty overlay for the worker name, model, and task; cancelling returns to this dashboard without creating anything.`,
-		`${key(theme, "I")} edits a draft worker's name, task, and model in AGENTS mode. ${key(theme, "S")} starts the selected job in AGENTS mode. If it was already started, clear it first with ${key(theme, "K")}. ${key(theme, "X")} aborts a running job. ${key(theme, "K")} clears selected job output after confirmation. ${key(theme, "Del/Backspace")} deletes the job and workspace after confirmation.`,
+		`${key(theme, "I")} edits a draft worker's name, task, and model in AGENTS mode. ${key(theme, "S")} starts the selected job in AGENTS mode. ${key(theme, "U")} starts the selected orchestrator order group after a confirmation overlay that lists runnable and skipped agents. If a worker was already started, clear it first with ${key(theme, "K")}. ${key(theme, "X")} aborts a running job. ${key(theme, "K")} clears selected job output after confirmation. ${key(theme, "Del/Backspace")} deletes the job and workspace after confirmation.`,
 		`${key(theme, "M")} sends a follow-up message from TRACKING. ${key(theme, "A")} approves and ${key(theme, "N")} denies pending approvals from APPROVALS. ${key(theme, "R")} refreshes artifact discovery from ARTIFACTS.`,
 		"",
 		heading("Dashboard modes"),
-		`${key(theme, "Agents mode")} shows the selected agent's identity, status, readable root, writable root, allowed tools, model, task, final response preview, process state, and recent logs.`,
+		`${key(theme, "Agents mode")} shows the selected agent's identity, status, readable root, writable root, allowed tools, model, task, final response preview, process state, and recent logs. Orchestrator-linked workers with the same order are grouped together; use ${key(theme, "U")} to start a parallel group after reviewing skipped non-runnable members.`,
 		`${key(theme, "Orchestrator mode")} shows orchestrator sessions/threads, the active plan, ordered worker drafts, pending start requests, wait state, and recent transcript. It follows AGENTS-style controls: ${key(theme, "C")} creates an orchestrator, ${key(theme, "B")} creates a fresh conversation thread under the selected orchestrator, ${key(theme, "S")} approves/starts a pending request, ${key(theme, "I")} edits title/model, ${key(theme, "X")} aborts a running orchestrator, ${key(theme, "K")} clears session state, and ${key(theme, "Del/Backspace")} deletes the session. Use ${key(theme, "M")} to message the selected thread and ${key(theme, "N")} to deny start requests.`,
 
 		`${key(theme, "Tracking mode")} auto-scrolls as work arrives until you manually scroll or press ${key(theme, "L")} to disable it. It shows user messages, worker responses, status changes, artifact-writing guidance, and compact tool activity; noisy read/search tool input and output are hidden. Use ${key(theme, "M")} to keep talking to a finished worker.`,
