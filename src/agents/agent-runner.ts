@@ -55,14 +55,20 @@ async function walkFiles(root: string, cwd: string, agentId: string): Promise<Ag
 			return;
 		}
 		for (const entry of entries) {
-			if (entry.name === "agent-job.json" || entry.name === "agent-job.json.tmp") continue;
+			if (entry.name === "agent-job.json" || (entry.name.startsWith("agent-job.json.") && entry.name.endsWith(".tmp"))) continue;
 			const absolutePath = path.join(current, entry.name);
 			if (entry.isDirectory()) {
 				await walk(absolutePath);
 				continue;
 			}
 			if (!entry.isFile()) continue;
-			const stat = await fs.stat(absolutePath);
+			let stat: fsSync.Stats;
+			try {
+				stat = await fs.stat(absolutePath);
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+				throw error;
+			}
 			const relativeToWorkspace = path.relative(root, absolutePath);
 			const isProposal = relativeToWorkspace === "proposals" || relativeToWorkspace.startsWith(`proposals${path.sep}`);
 			const isNote = relativeToWorkspace === "notes" || relativeToWorkspace.startsWith(`notes${path.sep}`);

@@ -42,6 +42,9 @@ export interface DashboardActions {
 	sendOrchestratorMessage?(sessionId: string): Promise<void>;
 	approveOrchestratorStartRequest?(sessionId: string, requestId: string): Promise<void>;
 	denyOrchestratorStartRequest?(sessionId: string, requestId: string): Promise<void>;
+	editOrchestratorSession?(sessionId: string): Promise<void>;
+	clearOrchestratorSession?(sessionId: string): Promise<boolean>;
+	deleteOrchestratorSession?(sessionId: string): Promise<boolean>;
 	refreshOrchestratorState?(): Promise<void>;
 }
 
@@ -77,6 +80,7 @@ export class Dashboard implements Component {
 			this.tui.requestRender();
 		});
 		this.orchestratorUnsubscribe = this.orchestratorStore?.subscribe(() => {
+			if (this.mode === "orchestrator") this.rightScrollOffset = Number.MAX_SAFE_INTEGER;
 			void this.refreshOrchestratorSnapshot();
 			this.invalidate();
 			this.tui.requestRender();
@@ -84,7 +88,10 @@ export class Dashboard implements Component {
 		if (this.orchestratorStore) {
 			this.orchestratorRefreshTimer = setInterval(() => {
 				const refresh = this.actions.refreshOrchestratorState?.() ?? this.orchestratorStore!.refresh();
-				void refresh.then(() => this.refreshOrchestratorSnapshot()).then(() => this.invalidateAndRender()).catch(() => undefined);
+				void refresh.then(() => {
+					if (this.mode === "orchestrator") this.rightScrollOffset = Number.MAX_SAFE_INTEGER;
+					return this.refreshOrchestratorSnapshot();
+				}).then(() => this.invalidateAndRender()).catch(() => undefined);
 			}, 1500);
 			void this.refreshOrchestratorSnapshot();
 		}
@@ -151,6 +158,16 @@ export class Dashboard implements Component {
 				await this.actions.createJob();
 				break;
 			case "clear":
+				if (this.mode === "orchestrator") {
+					const sessionId = this.orchestratorStore?.getSelectedId();
+					if (!sessionId) this.showNotice("No orchestrator session selected.", "warning");
+					else if (await this.actions.clearOrchestratorSession?.(sessionId)) {
+						this.rightScrollOffset = 0;
+						await this.refreshOrchestratorSnapshot();
+						this.showNotice("Cleared orchestrator session.", "info");
+					}
+					break;
+				}
 				if (!this.requireMode("normal", "Clear is available in AGENTS mode. Press G first.")) break;
 				if (!job) this.showNotice("No selected job.", "warning");
 				else if (await this.actions.clearJob(job)) {
@@ -161,16 +178,40 @@ export class Dashboard implements Component {
 				}
 				break;
 			case "start":
+				if (this.mode === "orchestrator") {
+					await this.resolveFirstOrchestratorStart("approved");
+					break;
+				}
 				if (!this.requireMode("normal", "Start is available in AGENTS mode. Press G first.")) break;
 				if (!job) this.showNotice("Create or select a job first.", "warning");
 				else if (this.agentHasStartedOutput(job)) this.showNotice("This agent has already been started. Clear it first with K if you want to run it from a blank state.", "warning");
 				else await this.runner.start(job.id);
 				break;
 			case "abort":
+				if (this.mode === "orchestrator") {
+					const sessionId = this.orchestratorStore?.getSelectedId();
+					if (!sessionId) this.showNotice("No orchestrator session selected.", "warning");
+					else if (!this.orchestratorRunner?.isRunning(sessionId)) this.showNotice("Selected orchestrator session is not running.", "warning");
+					else {
+						this.orchestratorRunner.abort(sessionId);
+						this.showNotice("Aborted orchestrator session.", "info");
+					}
+					break;
+				}
 				if (!this.requireMode("normal", "Abort is available in AGENTS mode. Press G first.")) break;
 				if (job) this.runner.abort(job.id);
 				break;
 			case "delete":
+				if (this.mode === "orchestrator") {
+					const sessionId = this.orchestratorStore?.getSelectedId();
+					if (!sessionId) this.showNotice("No orchestrator session selected.", "warning");
+					else if (await this.actions.deleteOrchestratorSession?.(sessionId)) {
+						this.rightScrollOffset = 0;
+						await this.refreshOrchestratorSnapshot();
+						this.showNotice("Deleted orchestrator session.", "info");
+					}
+					break;
+				}
 				if (!this.requireMode("normal", "Delete is available in AGENTS mode. Press G first.")) break;
 				if (!job) this.showNotice("No selected job.", "warning");
 				else if (await this.actions.deleteJob(job)) {
@@ -180,6 +221,13 @@ export class Dashboard implements Component {
 				}
 				break;
 			case "edit":
+				if (this.mode === "orchestrator") {
+					const sessionId = this.orchestratorStore?.getSelectedId();
+					if (!sessionId) this.showNotice("No orchestrator session selected.", "warning");
+					else await this.actions.editOrchestratorSession?.(sessionId);
+					await this.refreshOrchestratorSnapshot();
+					break;
+				}
 				if (!this.requireMode("normal", "Edit is available in AGENTS mode. Press G first.")) break;
 				if (!job) this.showNotice("No selected job.", "warning");
 				else if (this.agentHasStartedOutput(job)) this.showNotice("Only draft agents can be edited in this version.", "warning");
@@ -227,7 +275,7 @@ export class Dashboard implements Component {
 				break;
 			case "orchestrator":
 				this.mode = "orchestrator";
-				this.rightScrollOffset = 0;
+				this.rightScrollOffset = Number.MAX_SAFE_INTEGER;
 				await this.refreshOrchestratorSnapshot();
 				break;
 			case "approvals":

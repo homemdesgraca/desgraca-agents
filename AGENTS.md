@@ -121,6 +121,8 @@ ARTIFACTS mode opens a large artifact viewer. Diff viewing, proposal viewing, or
 
 The interface should remain fast, explicit, and user-controlled.
 
+Do not use generic inline `Y/N` confirmation prompts for dashboard actions. Use focused dashboard dialog screens or overlay components for confirmations, especially destructive or state-changing actions such as clear, delete, accept, approve, deny, and start.
+
 ## Implementation principles
 
 Prefer pi's native extension and TUI APIs before adding dependencies. The project should remain possible with:

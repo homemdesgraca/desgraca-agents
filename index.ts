@@ -14,10 +14,13 @@ import { OrchestratorStore } from "./src/orchestrator/orchestrator-store.ts";
 import { registerOrchestratorTools } from "./src/orchestrator/orchestrator-tools.ts";
 import { ArtifactViewer } from "./src/dashboard/artifact-viewer.ts";
 import { ClearAgentDialog } from "./src/dashboard/clear-agent-dialog.ts";
+import { ClearOrchestratorSessionDialog } from "./src/dashboard/clear-orchestrator-session-dialog.ts";
 import { CreateJobDialog, type CreateJobDialogResult } from "./src/dashboard/create-job-dialog.ts";
 import { CreateOrchestratorSessionDialog, type CreateOrchestratorSessionDialogResult } from "./src/dashboard/create-orchestrator-session-dialog.ts";
 import { Dashboard } from "./src/dashboard/Dashboard.ts";
 import { DeleteAgentDialog } from "./src/dashboard/delete-agent-dialog.ts";
+import { DeleteOrchestratorSessionDialog } from "./src/dashboard/delete-orchestrator-session-dialog.ts";
+import { EditOrchestratorSessionDialog, type EditOrchestratorSessionDialogResult } from "./src/dashboard/edit-orchestrator-session-dialog.ts";
 import { TrackingMessageDialog } from "./src/dashboard/tracking-message-dialog.ts";
 import { decideOrchestratorToolPolicy, decideToolPolicy } from "./src/permissions/policies.ts";
 import { checkAgentReadScope, checkAgentWriteScope, isPathInside } from "./src/permissions/scope-guard.ts";
@@ -422,6 +425,89 @@ export default function desgracaAgentsExtension(pi: ExtensionAPI) {
 							if (!ok) return;
 							await orchestratorStore.resolveStartRequest(sessionId, requestId, { status: "denied", denialReason: "Denied by user from ORCHESTRATOR mode." });
 							_tui.requestRender();
+						},
+						editOrchestratorSession: async (sessionId) => {
+							const session = orchestratorStore.get(sessionId);
+							if (!session) {
+								ctx.ui.notify("Orchestrator session no longer exists.", "warning");
+								return;
+							}
+							const modelOptions = getCreatableAgentModels(ctx);
+							const result = await ctx.ui.custom<EditOrchestratorSessionDialogResult | undefined>(
+								(dialogTui, dialogTheme, _dialogKeybindings, dialogDone) => new EditOrchestratorSessionDialog(dialogTui, dialogTheme, dialogDone, session, modelOptions),
+								{
+									overlay: true,
+									overlayOptions: {
+										anchor: "center",
+										width: "86%",
+										minWidth: 52,
+										maxHeight: "65%",
+										margin: 2,
+									},
+								},
+							);
+							if (!result) {
+								_tui.requestRender();
+								return;
+							}
+							await orchestratorStore.updateSession(sessionId, { title: result.title, model: result.model });
+							_tui.requestRender();
+						},
+						clearOrchestratorSession: async (sessionId) => {
+							const session = orchestratorStore.get(sessionId);
+							if (!session) {
+								ctx.ui.notify("Orchestrator session no longer exists.", "warning");
+								return false;
+							}
+							const ok = await ctx.ui.custom<boolean>(
+								(_dialogTui, dialogTheme, _dialogKeybindings, dialogDone) => new ClearOrchestratorSessionDialog(session, dialogTheme, dialogDone),
+								{
+									overlay: true,
+									overlayOptions: {
+										anchor: "center",
+										width: "85%",
+										minWidth: 54,
+										maxHeight: "60%",
+										margin: 2,
+									},
+								},
+							);
+							if (!ok) {
+								_tui.requestRender();
+								return false;
+							}
+							if (orchestratorRunner.isRunning(sessionId)) orchestratorRunner.abort(sessionId);
+							await orchestratorStore.clearSession(sessionId);
+							_tui.requestRender();
+							return true;
+						},
+						deleteOrchestratorSession: async (sessionId) => {
+							const session = orchestratorStore.get(sessionId);
+							if (!session) {
+								ctx.ui.notify("Orchestrator session no longer exists.", "warning");
+								return false;
+							}
+							const ok = await ctx.ui.custom<boolean>(
+								(_dialogTui, dialogTheme, _dialogKeybindings, dialogDone) => new DeleteOrchestratorSessionDialog(session, dialogTheme, dialogDone),
+								{
+									overlay: true,
+									overlayOptions: {
+										anchor: "center",
+										width: "85%",
+										minWidth: 54,
+										maxHeight: "60%",
+										margin: 2,
+									},
+								},
+							);
+							if (!ok) {
+								_tui.requestRender();
+								return false;
+							}
+							if (orchestratorRunner.isRunning(sessionId)) orchestratorRunner.abort(sessionId);
+							await orchestratorStore.deleteSession(sessionId);
+							_tui.requestRender();
+							return true;
 						},
 						deleteJob: async (job) => {
 							const ok = await ctx.ui.custom<boolean>(

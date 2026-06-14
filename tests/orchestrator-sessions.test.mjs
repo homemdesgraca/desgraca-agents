@@ -9,10 +9,78 @@ import { setupCompiledProject } from "./helpers/test-utils.mjs";
 const { importCompiled } = setupCompiledProject();
 
 describe("orchestrator sessions", () => {
-	test("dashboard keybinding reaches ORCHESTRATOR mode", async () => {
+	test("dashboard keybinding reaches ORCHESTRATOR mode and footer avoids duplicate jump hints", async () => {
 		const { parseDashboardAction } = await importCompiled("src/dashboard/keybindings.js");
+		const { renderFooterHints } = await importCompiled("src/dashboard/render.js");
+		const { renderOrchestratorRight } = await importCompiled("src/dashboard/render-orchestrator.js");
 		assert.deepEqual(parseDashboardAction("O"), { type: "orchestrator" });
 		assert.deepEqual(parseDashboardAction("o"), { type: "orchestrator" });
+		const modes = ["normal", "orchestrator", "logs", "approvals", "artifacts", "help"];
+		for (const mode of modes) {
+			const footer = renderFooterHints(160, undefined, mode).join("\n");
+			assert.doesNotMatch(footer, /jump/);
+			assert.doesNotMatch(footer, /Q\/E/);
+			assert.doesNotMatch(footer, /Esc/);
+		}
+		const orchestratorFooter = renderFooterHints(160, undefined, "orchestrator").join("\n");
+		assert.match(orchestratorFooter, /C.*create/);
+		assert.match(orchestratorFooter, /S.*start\/approve/);
+		assert.match(orchestratorFooter, /I.*edit/);
+		assert.match(orchestratorFooter, /X.*abort/);
+		assert.match(orchestratorFooter, /K.*clear/);
+		assert.match(orchestratorFooter, /Del.*delete/);
+
+		const renderedOrchestrator = renderOrchestratorRight({
+			session: { id: "s1", title: "Session", cwd: "/tmp/project", status: "running", activePlanPath: "/tmp/project/plan.md", createdAt: 1, updatedAt: 2 },
+			plan: "# Plan\n- item one\n- item two\n- item three\n- item four\n- item five",
+			drafts: [],
+			startRequests: [],
+			transcript: [
+				{ id: "t1", timestamp: 3, kind: "user", title: "User message", message: "please coordinate" },
+				{ id: "t2", timestamp: 4, kind: "tool", title: "Tool: orchestrator_list_agent_statuses", input: "{}", output: "No worker drafts yet." },
+				{ id: "t3", timestamp: 5, kind: "assistant", title: "Assistant response", message: "I will track this like the worker tracking screen." },
+			],
+		}, 100).join("\n");
+		assert.match(renderedOrchestrator, /Transcript/);
+		assert.match(renderedOrchestrator, /User message/);
+		assert.match(renderedOrchestrator, /Input:/);
+		assert.match(renderedOrchestrator, /Output:/);
+		assert.match(renderedOrchestrator, /Assistant response/);
+	});
+
+	test("orchestrator clear and delete dialogs confirm or cancel explicitly", async () => {
+		const { ClearOrchestratorSessionDialog } = await importCompiled("src/dashboard/clear-orchestrator-session-dialog.js");
+		const { DeleteOrchestratorSessionDialog } = await importCompiled("src/dashboard/delete-orchestrator-session-dialog.js");
+		const theme = {
+			fg: (_color, text) => text,
+			bg: (_color, text) => text,
+			bold: (text) => text,
+		};
+		const session = {
+			id: "session-1",
+			title: "Planning session",
+			cwd: "/tmp/project",
+			status: "idle",
+			activePlanPath: "/tmp/project/.agents/_orchestrator/sessions/session-1/plan.md",
+			createdAt: Date.now(),
+			updatedAt: Date.now(),
+		};
+		const clearResults = [];
+		const clearDialog = new ClearOrchestratorSessionDialog(session, theme, (confirmed) => clearResults.push(confirmed));
+		assert.match(clearDialog.render(90).join("\n"), /Clear Planning session/);
+		clearDialog.handleInput("n");
+		assert.deepEqual(clearResults, [false]);
+		clearDialog.handleInput("y");
+		assert.deepEqual(clearResults, [false, true]);
+
+		const deleteResults = [];
+		const deleteDialog = new DeleteOrchestratorSessionDialog(session, theme, (confirmed) => deleteResults.push(confirmed));
+		assert.match(deleteDialog.render(90).join("\n"), /Delete Planning session/);
+		assert.match(deleteDialog.render(90).join("\n"), /Linked worker jobs are not deleted/);
+		deleteDialog.handleInput("q");
+		assert.deepEqual(deleteResults, [false]);
+		deleteDialog.handleInput("\r");
+		assert.deepEqual(deleteResults, [false, true]);
 	});
 
 	test("orchestrator settings normalize safely and filter forbidden runner tools", async () => {
@@ -98,7 +166,7 @@ describe("orchestrator sessions", () => {
 		}
 	});
 
-	test("orchestrator store persists sessions, transcripts, plans, drafts, and requests", async () => {
+	test("orchestrator store persists, clears, and deletes sessions", async () => {
 		const { AgentStore } = await importCompiled("src/agents/agent-store.js");
 		const { OrchestratorStore } = await importCompiled("src/orchestrator/orchestrator-store.js");
 		const { createDefaultSettings } = await importCompiled("src/settings/settings.js");
@@ -141,6 +209,19 @@ describe("orchestrator sessions", () => {
 			assert.equal(snapshot?.startRequests[0].status, "denied");
 			assert.ok(snapshot?.transcript.some((entry) => entry.title === "User"));
 			assert.equal(snapshot?.transcript.some((entry) => entry.title === "not json"), false);
+
+			await reloaded.clearSession(session.id);
+			const cleared = await reloaded.getSnapshot(session.id);
+			assert.equal(cleared?.plan, "");
+			assert.deepEqual(cleared?.drafts, []);
+			assert.deepEqual(cleared?.startRequests, []);
+			assert.deepEqual(cleared?.transcript, []);
+			assert.equal(reloaded.get(session.id)?.status, "idle");
+
+			const sessionDir = reloaded.getSessionDir(session.id);
+			assert.equal(await reloaded.deleteSession(session.id), true);
+			assert.equal(reloaded.get(session.id), undefined);
+			assert.equal(fs.existsSync(sessionDir), false);
 		} finally {
 			await fsp.rm(cwd, { recursive: true, force: true });
 		}

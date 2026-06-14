@@ -1,6 +1,6 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { AgentJob } from "../agents/agent-job.ts";
-import type { OrchestratorSession, OrchestratorSessionSnapshot } from "../orchestrator/orchestrator-session.ts";
+import type { OrchestratorSession, OrchestratorSessionSnapshot, OrchestratorTranscriptEntry } from "../orchestrator/orchestrator-session.ts";
 import { clampLine, formatTime, padLine, renderSectionTitle, wrapPlainLine } from "./render.ts";
 
 function fg(theme: Theme | undefined, color: Parameters<Theme["fg"]>[0], text: string): string {
@@ -9,6 +9,10 @@ function fg(theme: Theme | undefined, color: Parameters<Theme["fg"]>[0], text: s
 
 function bg(theme: Theme | undefined, color: Parameters<Theme["bg"]>[0], text: string): string {
 	return theme ? theme.bg(color, text) : text;
+}
+
+function bold(theme: Theme | undefined, text: string): string {
+	return theme ? theme.bold(text) : text;
 }
 
 function wrapWords(text: string, width: number): string[] {
@@ -86,17 +90,41 @@ export function renderOrchestratorLeft(
 	return lines;
 }
 
+function transcriptKindColor(entry: OrchestratorTranscriptEntry): Parameters<Theme["fg"]>[0] {
+	if (entry.kind === "assistant") return "success";
+	if (entry.kind === "user") return "accent";
+	if (entry.kind === "tool") return "toolTitle";
+	if (entry.kind === "error") return "error";
+	return "muted";
+}
+
+function renderTranscriptEntry(entry: OrchestratorTranscriptEntry, width: number, theme?: Theme): string[] {
+	const lines = [clampLine(`${fg(theme, "dim", formatTime(entry.timestamp))} ${fg(theme, transcriptKindColor(entry), bold(theme, entry.title))}`, width)];
+	if (entry.message) lines.push(...entry.message.split("\n").flatMap((line) => wrapWords(line || " ", Math.max(8, width - 2))).map((line) => clampLine(`  ${fg(theme, "toolOutput", line)}`, width)));
+	if (entry.input) {
+		lines.push(clampLine(`  ${fg(theme, "dim", "Input:")}`, width));
+		lines.push(...entry.input.split("\n").flatMap((line) => wrapWords(line || " ", Math.max(8, width - 4))).map((line) => clampLine(`    ${fg(theme, "muted", line)}`, width)));
+	}
+	if (entry.output) {
+		lines.push(clampLine(`  ${fg(theme, "dim", "Output:")}`, width));
+		lines.push(...entry.output.split("\n").flatMap((line) => wrapWords(line || " ", Math.max(8, width - 4))).map((line) => clampLine(`    ${fg(theme, "toolOutput", line)}`, width)));
+	}
+	lines.push("");
+	return lines;
+}
+
 export function renderOrchestratorRight(snapshot: OrchestratorSessionSnapshot | undefined, width: number, theme?: Theme): string[] {
 	const lines: string[] = [renderSectionTitle("Orchestrator", width, theme)];
 	if (!snapshot) return [...lines, clampLine(fg(theme, "dim", "No active session."), width)];
 	lines.push(clampLine(`Session: ${snapshot.session.title}`, width));
 	lines.push(clampLine(`Status: ${snapshot.session.status}  Updated: ${formatTime(snapshot.session.updatedAt)}`, width));
+	if (snapshot.session.waitingFor) lines.push(clampLine(`Waiting: ${snapshot.session.waitingFor.kind} ${snapshot.session.waitingFor.agentName ?? snapshot.session.waitingFor.requestId ?? ""}`, width));
 	lines.push("");
-	lines.push(renderSectionTitle("Plan", width, theme));
-	const planLines = snapshot.plan.trim() ? snapshot.plan.split("\n").flatMap((line) => wrapWords(line, width)).slice(0, 8) : [fg(theme, "dim", "No plan yet.")];
+	lines.push(renderSectionTitle("Plan summary", width, theme));
+	const planLines = snapshot.plan.trim() ? snapshot.plan.split("\n").flatMap((line) => wrapWords(line, width)).slice(0, 4) : [fg(theme, "dim", "No plan yet.")];
 	lines.push(...planLines.map((line) => clampLine(line, width)));
 	lines.push("");
-	lines.push(renderSectionTitle("Start requests", width, theme));
+	lines.push(renderSectionTitle("Pending starts", width, theme));
 	const pending = snapshot.startRequests.filter((request) => request.status === "pending");
 	if (pending.length === 0) lines.push(clampLine(fg(theme, "dim", "No pending start requests."), width));
 	else {
@@ -106,14 +134,8 @@ export function renderOrchestratorRight(snapshot: OrchestratorSessionSnapshot | 
 		}
 	}
 	lines.push("");
-	lines.push(renderSectionTitle("Recent transcript", width, theme));
-	const transcript = snapshot.transcript.slice(-12);
-	if (transcript.length === 0) lines.push(clampLine(fg(theme, "dim", "No transcript yet. Press M to send a message."), width));
-	else {
-		for (const entry of transcript) {
-			lines.push(clampLine(`${formatTime(entry.timestamp)} ${entry.kind} ${entry.title}`, width));
-			if (entry.message) lines.push(...wrapWords(entry.message, Math.max(8, width - 2)).slice(0, 3).map((line) => clampLine(`  ${fg(theme, "toolOutput", line)}`, width)));
-		}
-	}
+	lines.push(renderSectionTitle("Transcript", width, theme));
+	if (snapshot.transcript.length === 0) lines.push(clampLine(fg(theme, "dim", "No transcript yet. Press M to send a message."), width));
+	else lines.push(...snapshot.transcript.flatMap((entry) => renderTranscriptEntry(entry, width, theme)));
 	return lines;
 }

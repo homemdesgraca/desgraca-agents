@@ -347,7 +347,6 @@ function packTokens(tokens: string[], width: number, separator = "  "): string[]
 }
 
 export function renderFooterHints(width: number, theme?: Theme, mode: DashboardMode = "normal"): string[] {
-	const commonClose = `${key(theme, "Esc")} close`;
 	const hintsByMode: Record<DashboardMode, string[]> = {
 		normal: [
 			`${key(theme, "C")} create`,
@@ -357,37 +356,29 @@ export function renderFooterHints(width: number, theme?: Theme, mode: DashboardM
 			`${key(theme, "X")} abort`,
 			`${key(theme, "K")} clear`,
 			`${key(theme, "Del")} delete`,
-			`${key(theme, "Q/E")} modes`,
-			`${key(theme, "O/T/P/F/H")} jump`,
-			commonClose,
 		],
 		orchestrator: [
+			`${key(theme, "C")} create`,
 			`${key(theme, "1-9")} select session`,
-			`${key(theme, "C")} new session`,
+			`${key(theme, "S")} start/approve`,
+			`${key(theme, "I")} edit`,
+			`${key(theme, "X")} abort`,
+			`${key(theme, "K")} clear`,
+			`${key(theme, "Del")} delete`,
 			`${key(theme, "M")} message`,
-			`${key(theme, "A/Enter")} approve start`,
-			`${key(theme, "N")} deny start`,
+			`${key(theme, "N")} deny`,
 			`${key(theme, "↑/↓")} scroll`,
-			`${key(theme, "Q/E")} modes`,
-			`${key(theme, "G/T/P/F/H")} jump`,
-			commonClose,
 		],
 		logs: [
 			`${key(theme, "1-9")} select agent`,
 			`${key(theme, "M")} message`,
 			`${key(theme, "↑/↓")} scroll`,
-			`${key(theme, "Q/E")} modes`,
-			`${key(theme, "G/O/P/F/H")} jump`,
-			commonClose,
 		],
 		approvals: [
 			`${key(theme, "1-9")} select agent`,
 			`${key(theme, "A")} approve`,
 			`${key(theme, "N")} deny`,
 			`${key(theme, "↑/↓")} scroll`,
-			`${key(theme, "Q/E")} modes`,
-			`${key(theme, "G/O/T/F/H")} jump`,
-			commonClose,
 		],
 		artifacts: [
 			`${key(theme, "1-9")} select agent`,
@@ -397,15 +388,9 @@ export function renderFooterHints(width: number, theme?: Theme, mode: DashboardM
 			`${key(theme, "V")} notes`,
 			`${key(theme, "R")} refresh`,
 			`${key(theme, "↑/↓")} scroll`,
-			`${key(theme, "Q/E")} modes`,
-			`${key(theme, "G/O/T/P/H")} jump`,
-			commonClose,
 		],
 		help: [
-			`${key(theme, "Q/E")} modes`,
-			`${key(theme, "G/O/T/P/F")} jump`,
 			`${key(theme, "↑/↓")} scroll`,
-			commonClose,
 		],
 	};
 	return packTokens(hintsByMode[mode], width).map((line) => padLine(line, width));
@@ -426,7 +411,8 @@ export function renderHelp(width: number, theme?: Theme): string[] {
 		"",
 		heading("Dashboard modes"),
 		`${key(theme, "Agents mode")} shows the selected agent's identity, status, readable root, writable root, allowed tools, model, task, final response preview, process state, and recent logs.`,
-		`${key(theme, "Orchestrator mode")} shows orchestrator sessions, the active plan, ordered worker drafts, pending start requests, wait state, and recent transcript. Use ${key(theme, "M")} to message the orchestrator, ${key(theme, "C")} to create a session, and ${key(theme, "A/Enter")} or ${key(theme, "N")} to approve or deny start requests through confirmation overlays.`,
+		`${key(theme, "Orchestrator mode")} shows orchestrator sessions, the active plan, ordered worker drafts, pending start requests, wait state, and recent transcript. It follows AGENTS-style controls: ${key(theme, "C")} creates a session, ${key(theme, "S")} approves/starts a pending request, ${key(theme, "I")} edits title/model, ${key(theme, "X")} aborts a running orchestrator, ${key(theme, "K")} clears session state, and ${key(theme, "Del/Backspace")} deletes the session. Use ${key(theme, "M")} to message the orchestrator and ${key(theme, "N")} to deny start requests.`,
+
 		`${key(theme, "Tracking mode")} auto-scrolls as work arrives and shows a readable timeline of user messages, worker responses, status changes, artifact-writing guidance, and detailed tool activity. Use ${key(theme, "M")} to keep talking to a finished worker.`,
 		`${key(theme, "Approvals mode")} shows pending sensitive tool requests for the selected agent, including tool name, input summary, policy reason, and simple risk warnings.`,
 		`${key(theme, "Artifacts mode")} lists files discovered under the selected agent's .agents workspace, with notes labeled separately. Use ${key(theme, "[")} and ${key(theme, "]")} to move between visible items, ${key(theme, "Enter")} to open a large artifact viewer, and ${key(theme, "V")} to hide or show notes. ${key(theme, "1-9")} still selects agents in this mode.`,

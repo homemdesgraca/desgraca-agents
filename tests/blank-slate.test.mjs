@@ -120,6 +120,7 @@ describe("blank-slate MVP foundations", () => {
 			await fsp.mkdir(path.join(job.writableRoot, "notes"), { recursive: true });
 			await fsp.writeFile(path.join(job.writableRoot, "proposals", "nested", "notes.md"), "hello");
 			await fsp.writeFile(path.join(job.writableRoot, "notes", "handoff.md"), "note");
+			await fsp.writeFile(path.join(job.writableRoot, "agent-job.json.123.456.uuid.tmp"), "transient state write");
 			await fsp.writeFile(path.join(cwd, "main-project.txt"), "must not be listed");
 			const artifacts = await discoverArtifacts(job);
 			assert.deepEqual(artifacts.map((artifact) => artifact.path), [

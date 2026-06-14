@@ -189,6 +189,27 @@ export class OrchestratorStore {
 		});
 	}
 
+	async clearSession(id: string): Promise<OrchestratorSession | undefined> {
+		const session = this.sessions.get(id);
+		if (!session) return undefined;
+		const sessionDir = this.sessionDir(session.cwd, session.id);
+		await writeTextFileAtomic(path.join(sessionDir, PLAN_FILE), "");
+		await writeTextFileAtomic(path.join(sessionDir, TRANSCRIPT_FILE), "");
+		await writeJsonFileAtomic(path.join(sessionDir, DRAFTS_FILE), []);
+		await writeJsonFileAtomic(path.join(sessionDir, START_REQUESTS_FILE), []);
+		return this.updateSession(id, { status: "idle", waitingFor: undefined, process: undefined, finishedAt: undefined });
+	}
+
+	async deleteSession(id: string): Promise<boolean> {
+		const session = this.sessions.get(id);
+		if (!session) return false;
+		this.sessions.delete(id);
+		if (this.selectedSessionId === id) this.selectedSessionId = this.list()[0]?.id;
+		await fs.rm(this.sessionDir(session.cwd, session.id), { recursive: true, force: true });
+		this.notify();
+		return true;
+	}
+
 	async appendTranscript(sessionId: string, entry: Omit<OrchestratorTranscriptEntry, "id" | "timestamp">): Promise<OrchestratorTranscriptEntry | undefined> {
 		const session = this.sessions.get(sessionId);
 		if (!session) return undefined;
