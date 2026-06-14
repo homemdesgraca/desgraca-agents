@@ -79,6 +79,48 @@ Each agent job should track at least:
 
 Agents may be started, aborted, cleared, deleted, inspected, and sent follow-up messages from the dashboard.
 
+## Parallel agent groups
+
+Orchestrator-created agents with the same numeric execution `order` are displayed as a parallel group in AGENTS mode. These agents are intended to run at the same time.
+
+- Agents are grouped by both orchestrator session and order: same `source.kind === "orchestrator"`, same `source.sessionId`, and same `source.order`.
+- Agents from different orchestrator sessions are never grouped together.
+- The AGENTS tab visually groups same-order orchestrator jobs together.
+- Press `U` in AGENTS mode to start the selected agent's parallel group after a focused confirmation overlay.
+- The confirmation overlay lists runnable agents and skipped agents with reasons.
+- If the group has 4 or more members, a large-group warning appears before starting.
+- Confirming starts all currently runnable members and skips non-runnable members.
+- Individual `S` start still works as before for single agents.
+
+## Orchestrator model
+
+Orchestrators are planning sessions that coordinate multiple worker agents. They cannot directly edit project files, approve tool calls, or apply artifacts.
+
+Each orchestrator session tracks:
+
+- title,
+- status,
+- selected model,
+- allowed tools or permission profile,
+- readable root,
+- writable root for session data,
+- recent logs,
+- tracking events,
+- pending start requests,
+- produced artifacts,
+- final response,
+- process metadata when running.
+
+Orchestrators may be started, aborted, cleared, deleted, inspected, and sent follow-up messages from the dashboard.
+
+Orchestrators can create ordered worker drafts with only `name`, `task`, and `order`. Workers with the same order are intended to be parallelizable. When an orchestrator requests to start a worker order:
+
+- If exactly one worker has that order, that worker starts.
+- If multiple workers share the order, they are started together as a group.
+- The request appears as a prominent `ACTION REQUIRED` callout in ORCHESTRATOR mode.
+- Approving or denying the request uses a focused dashboard overlay.
+- The orchestrator may also request a specific worker by `name` for legacy compatibility.
+
 ## Proposal and artifact model
 
 Workers must not edit project files directly. When a worker needs to suggest a project change, it should create a proposal through agent-only proposal tools.
@@ -110,6 +152,7 @@ Keyboard control should be direct and modal where useful. Do not assume the user
 Current dashboard mode keys:
 
 - `G` for AGENTS,
+- `O` for ORCHESTRATOR,
 - `T` for TRACKING,
 - `P` for APPROVALS,
 - `F` for ARTIFACTS,

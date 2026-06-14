@@ -30,12 +30,15 @@ In **AGENTS** mode:
 - `C`: Create a new job.
 - `I`: Edit a draft job's name, task, and model.
 - `S`: Start the selected job.
+- `U`: Start the selected orchestrator parallel group after confirmation.
 - `X`: Abort the selected running job.
 - `K`: Clear selected-agent output after confirmation.
 - `Delete` or `Backspace`: Delete the selected job after confirmation.
 - `1`-`9`: Select an agent job.
 
 A job that has already produced output cannot be started again from a blank state until it is cleared. Use **TRACKING** mode to continue it with a follow-up message instead.
+
+Orchestrator-created agents with the same session and numeric `order` are shown together as a parallel group in **AGENTS** mode. Select any member of the group and press `U` to review a focused confirmation overlay. The overlay lists agents that will start and agents that will be skipped because they are not runnable, such as already-running workers, finished workers, workers with artifacts, or workers with pending approvals. Confirming starts the runnable members only. Groups with 4 or more members show an additional large-group warning before anything starts.
 
 ## Orchestrator mode
 
@@ -57,7 +60,7 @@ The orchestrator can:
 
 - Update the session plan.
 - Create ordered worker drafts with only `name`, `task`, and `order`.
-- Request that a worker start.
+- Request that a worker order start. If one worker has that order, it requests that worker; if multiple workers share the order, it requests the same-order group.
 - List worker statuses and get details for specific workers.
 - Create and edit session notes.
 - Suggest artifact edits (review-only suggestions attached to worker artifacts).
@@ -66,14 +69,14 @@ The orchestrator cannot directly edit project files, approve worker tool calls, 
 
 ## Start request flow
 
-When an orchestrator requests to start a worker:
+When an orchestrator requests to start a worker order:
 
-1. A pending start request appears in ORCHESTRATOR mode.
-2. Press `S` or `Enter` to approve, or `N` to deny.
-3. On approval, the worker starts through the normal parent runner.
-4. On denial, the request is marked denied and the worker does not start.
+1. A prominent **ACTION REQUIRED** pending start request appears in ORCHESTRATOR mode.
+2. Press `S` or `Enter` to open a focused approval overlay, or `N` to open a focused denial overlay.
+3. On approval, runnable requested workers start through the normal parent runner. If the order contains multiple workers, the overlay lists runnable and skipped members before anything starts.
+4. On denial, the request is marked denied and no workers start.
 
-You can approve start requests from either ORCHESTRATOR mode or APPROVALS mode.
+Approvals and denials use dashboard overlays, not inline prompts. Worker tool approvals remain separate from orchestrator start requests.
 
 ## Tracking and follow-up messages
 
@@ -136,13 +139,13 @@ Orchestrator artifact suggestions appear in the selected artifact details. To fu
 1. Open `/agents` and press `O` to enter ORCHESTRATOR mode.
 2. Press `C` to create a new orchestrator session with a title and model.
 3. Press `M` to send an initial prompt or wait for the orchestrator to respond.
-4. Ask the orchestrator to create worker drafts with specific tasks and order.
+4. Ask the orchestrator to create worker drafts with specific tasks and order. Workers with the same order are intended to be parallelizable.
 5. Switch to **AGENTS** mode to review the drafted workers.
 6. Edit worker models or tasks if needed using `I`.
-7. Return to ORCHESTRATOR mode and ask it to start the first worker.
-8. Approve the start request with `S`.
-9. Monitor progress in **TRACKING** mode.
-10. When the first worker completes, ask the orchestrator to start the next worker.
+7. To run a same-order group yourself, select one member and press `U`, then confirm the runnable members.
+8. To let the orchestrator request starts, return to ORCHESTRATOR mode and ask it to start the next order.
+9. Approve start requests with `S` after reviewing the overlay.
+10. Monitor progress in **TRACKING** mode.
 11. Review artifacts and proposals as they are generated.
 
 ## Settings

@@ -58,14 +58,14 @@ Replaces the active plan for the orchestrator session.
 Creates or updates an ordered worker draft with minimal input.
 
 - **Input**: `{ name: string, task: string, order: number }`
-- **Behavior**: Creates a draft with the given name, task, and run order. If a linked `AgentJob` exists and is still a draft without user edits, it updates the job. Otherwise, it creates a new draft job.
+- **Behavior**: Creates a draft with the given name, task, and run order. If a linked `AgentJob` exists and is still a draft without user edits, it updates the job. Otherwise, it creates a new draft job. Drafts from the same orchestrator session with the same order are displayed as a parallel group in AGENTS mode; this grouping is derived from existing metadata and is not persisted as a separate model.
 
 ### `orchestrator_request_start_agent`
 
-Requests the user to start a drafted agent.
+Requests the user to start drafted worker(s). Despite the legacy name, the preferred target is numeric order.
 
-- **Input**: `{ name: string, waitForResponse?: boolean }`
-- **Behavior**: Creates a pending start request. If `waitForResponse` is false, returns immediately. If true, polls until the request is denied or the worker reaches terminal status.
+- **Input**: `{ order?: number, name?: string, waitForResponse?: boolean }`
+- **Behavior**: With `order`, creates one pending request for every draft in the active session with that order. If only one worker has the order, the same flow starts just that worker. `name` remains supported for legacy single-agent starts. If `waitForResponse` is false, the tool returns immediately. If true, it polls until the request is denied or all started workers reach terminal status, then returns each started agent's final response individually.
 
 ### `orchestrator_list_agent_statuses`
 
@@ -128,7 +128,7 @@ Important fields:
 - `artifacts`: Discovered files from the writable root.
 - `finalResponse`: Last assistant final response from the worker.
 - `process`: Subprocess metadata such as command, pid, exit code, and signal.
-- `source`: Optional metadata indicating the job was created from an orchestrator draft.
+- `source`: Optional metadata indicating the job was created from an orchestrator draft. For orchestrator jobs, `source.sessionId + source.order` is also used to derive dashboard-only parallel groups.
 - `userEditedAt`: Timestamp marking when the user edited the job from AGENTS mode.
 
 ### `AgentArtifact`
@@ -194,14 +194,19 @@ Proposal acceptance is not represented as an `AgentApproval`; it is handled by t
 
 - `id`: Request identifier.
 - `sessionId`: Parent session id.
-- `draftId`: Associated draft id.
-- `agentJobId`: Linked agent job id.
-- `agentName`: Worker name.
+- `kind`: Request target kind, either `agent` or `order` when present.
+- `order`: Numeric worker order for order-based requests.
+- `draftId`: First associated draft id for compatibility.
+- `draftIds`: Associated draft ids for order/group requests.
+- `agentJobId`: First linked agent job id for compatibility.
+- `agentJobIds`: Linked agent job ids for order/group requests.
+- `agentName`: Display label for the request.
+- `agentNames`: Requested worker names for order/group requests.
 - `waitForResponse`: Whether the orchestrator should wait for resolution.
 - `status`: `pending`, `approved`, `denied`, `started`, `done`, `failed`, or `aborted`.
 - `message`: User message for the request.
 - `createdAt`, `resolvedAt`, `startedAt`, `finishedAt`: Timestamps.
-- `resultSummary`: Summary of the worker result when resolved.
+- `resultSummary`: For completed start requests, final responses from each started worker separated by worker name.
 - `denialReason`: Reason for denial, if denied.
 
 ## Settings schema
@@ -228,3 +233,11 @@ interface AgentExtensionSettings {
 - `orchestrator.runnerTools`: List of tools allowed in orchestrator subprocesses.
 
 Default orchestrator policies allow read/search tools, orchestrator control tools, notes tools, and deny `bash` by default.
+
+## Parallel agent groups
+
+Parallel groups are a derived dashboard view, not a persisted data model. The AGENTS tab groups orchestrator-linked jobs when they share the same `source.sessionId` and `source.order`. Jobs from different orchestrator sessions are not grouped together even if their numeric order matches.
+
+The `U` group-start action builds an in-memory start plan for the selected job's group. Each member is rechecked before launch and skipped if it is already running, no longer a draft, has prior output, has artifacts, or has pending approvals. Confirming a group start calls the same per-agent runner used by `S`; it does not resolve approvals, apply artifacts, mark orchestrator start requests as started, or create extra group files.
+
+Orchestrator order start requests use the same derived group logic, but they are tracked as `OrchestratorStartRequest` records. Approving or denying these requests uses a focused dashboard overlay. Order-based request completion stores each started worker's final response under the request result summary, separated by worker name.
