@@ -255,12 +255,13 @@ export function renderTracking(job: AgentJob | undefined, width: number, theme?:
 	return job.tracking.flatMap((entry) => {
 		const kindColor: FgColor = entry.kind === "assistant" ? "success" : entry.kind === "user" ? "accent" : entry.kind === "tool" ? "toolTitle" : entry.kind === "error" ? "error" : "muted";
 		const lines = [clampLine(`${fg(theme, "dim", formatTime(entry.timestamp))} ${fg(theme, kindColor, bold(theme, entry.title))}`, width)];
-		if (entry.message) lines.push(...wrapWords(entry.message, Math.max(8, width - 2)).map((line) => clampLine(`  ${fg(theme, "toolOutput", line)}`, width)));
-		if (entry.input) {
+		const hideToolDetails = entry.kind === "tool" && shouldHideToolDetails(entry.toolName ?? entry.title);
+		if (entry.message) lines.push(...wrapWords(hideToolDetails ? `${entry.message} (details hidden)` : entry.message, Math.max(8, width - 2)).map((line) => clampLine(`  ${fg(theme, "toolOutput", line)}`, width)));
+		if (!hideToolDetails && entry.input) {
 			lines.push(clampLine(`  ${fg(theme, "dim", "Input:")}`, width));
 			lines.push(...entry.input.split("\n").flatMap((line) => wrapWords(line, Math.max(8, width - 4))).map((line) => clampLine(`    ${fg(theme, "muted", line)}`, width)));
 		}
-		if (entry.output) {
+		if (!hideToolDetails && entry.output) {
 			lines.push(clampLine(`  ${fg(theme, "dim", "Output:")}`, width));
 			lines.push(...entry.output.split("\n").flatMap((line) => wrapWords(line, Math.max(8, width - 4))).map((line) => clampLine(`    ${fg(theme, "toolOutput", line)}`, width)));
 		}
@@ -324,6 +325,16 @@ export function renderArtifactContent(artifact: AgentArtifact | undefined, width
 	return output;
 }
 
+const LOW_VALUE_DETAIL_TOOLS = new Set(["read", "grep", "rg", "find", "ls", "glob", "search", "scan", "list"]);
+
+export function shouldHideToolDetails(toolName: string | undefined): boolean {
+	if (!toolName) return false;
+	const normalized = toolName.toLowerCase().replace(/^tool:\s*/, "").trim();
+	const parts = normalized.split(/[.\s:/_-]+/).filter(Boolean);
+	const last = parts.at(-1) ?? normalized;
+	return LOW_VALUE_DETAIL_TOOLS.has(last);
+}
+
 function key(theme: Theme | undefined, value: string): string {
 	return fg(theme, "accent", bold(theme, value));
 }
@@ -368,11 +379,15 @@ export function renderFooterHints(width: number, theme?: Theme, mode: DashboardM
 			`${key(theme, "M")} message`,
 			`${key(theme, "N")} deny`,
 			`${key(theme, "↑/↓")} scroll`,
+			`${key(theme, "PgUp/PgDn")} top/bottom`,
+			`${key(theme, "L")} auto-scroll`,
 		],
 		logs: [
 			`${key(theme, "1-9")} select agent`,
 			`${key(theme, "M")} message`,
 			`${key(theme, "↑/↓")} scroll`,
+			`${key(theme, "PgUp/PgDn")} top/bottom`,
+			`${key(theme, "L")} auto-scroll`,
 		],
 		approvals: [
 			`${key(theme, "1-9")} select agent`,
@@ -401,7 +416,7 @@ export function renderHelp(width: number, theme?: Theme): string[] {
 	const lines = [
 		heading("Navigation"),
 		`${key(theme, "1-9")} select an agent job from the left pane. The selected job drives every detail view and action, including ARTIFACTS mode.`,
-		`${key(theme, "↑/↓")} scroll the right-hand panel when its content is longer than the visible dashboard area.`,
+		`${key(theme, "↑/↓")} scroll the right-hand panel when its content is longer than the visible dashboard area. ${key(theme, "PgUp/PgDn")} jumps the right-hand panel to the top or bottom. ${key(theme, "L")} toggles auto-scroll for TRACKING and ORCHESTRATOR updates.`,
 		`${key(theme, "G/O/T/P/F/H")} jump directly to AGENTS, ORCHESTRATOR, TRACKING, APPROVALS, ARTIFACTS, and HELP. ${key(theme, "Q/E")} walks backward/forward through modes. ${key(theme, "Esc")} closes the dashboard.`,
 		"",
 		heading("Job actions"),
@@ -413,7 +428,7 @@ export function renderHelp(width: number, theme?: Theme): string[] {
 		`${key(theme, "Agents mode")} shows the selected agent's identity, status, readable root, writable root, allowed tools, model, task, final response preview, process state, and recent logs.`,
 		`${key(theme, "Orchestrator mode")} shows orchestrator sessions, the active plan, ordered worker drafts, pending start requests, wait state, and recent transcript. It follows AGENTS-style controls: ${key(theme, "C")} creates a session, ${key(theme, "S")} approves/starts a pending request, ${key(theme, "I")} edits title/model, ${key(theme, "X")} aborts a running orchestrator, ${key(theme, "K")} clears session state, and ${key(theme, "Del/Backspace")} deletes the session. Use ${key(theme, "M")} to message the orchestrator and ${key(theme, "N")} to deny start requests.`,
 
-		`${key(theme, "Tracking mode")} auto-scrolls as work arrives and shows a readable timeline of user messages, worker responses, status changes, artifact-writing guidance, and detailed tool activity. Use ${key(theme, "M")} to keep talking to a finished worker.`,
+		`${key(theme, "Tracking mode")} auto-scrolls as work arrives until you manually scroll or press ${key(theme, "L")} to disable it. It shows user messages, worker responses, status changes, artifact-writing guidance, and compact tool activity; noisy read/search tool input and output are hidden. Use ${key(theme, "M")} to keep talking to a finished worker.`,
 		`${key(theme, "Approvals mode")} shows pending sensitive tool requests for the selected agent, including tool name, input summary, policy reason, and simple risk warnings.`,
 		`${key(theme, "Artifacts mode")} lists files discovered under the selected agent's .agents workspace, with notes labeled separately. Use ${key(theme, "[")} and ${key(theme, "]")} to move between visible items, ${key(theme, "Enter")} to open a large artifact viewer, and ${key(theme, "V")} to hide or show notes. ${key(theme, "1-9")} still selects agents in this mode.`,
 		`${key(theme, "Help mode")} is this reference view with grouped navigation, job actions, and mode descriptions.`,

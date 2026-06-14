@@ -152,7 +152,7 @@ describe("blank-slate MVP foundations", () => {
 
 	test("dashboard renderers expose jobs, approvals, artifacts, and direct-key help", async () => {
 		const { createAgentJob } = await importCompiled("src/agents/agent-job.js");
-		const { renderJobList, renderApprovals, renderArtifacts, renderArtifactContent, renderFooterHints, renderHelp } = await importCompiled("src/dashboard/render.js");
+		const { renderJobList, renderApprovals, renderArtifacts, renderArtifactContent, renderFooterHints, renderHelp, renderTracking } = await importCompiled("src/dashboard/render.js");
 		const { parseDashboardAction } = await importCompiled("src/dashboard/keybindings.js");
 		const cwd = await fsp.mkdtemp(path.join(os.tmpdir(), "render-"));
 		try {
@@ -200,9 +200,17 @@ describe("blank-slate MVP foundations", () => {
 			assert.match(renderArtifactContent(job.artifacts[0], 100).join("\n"), /line two/);
 			assert.match(renderHelp(120).join("\n"), /C create/);
 			assert.match(renderHelp(120).join("\n"), /1-9 still/);
+			job.tracking.push({ id: "tool-read", timestamp: Date.now(), kind: "tool", title: "Tool: read", toolName: "read", message: "tool result", input: "very long read input", output: "very long read output" });
+			job.tracking.push({ id: "tool-bash", timestamp: Date.now(), kind: "tool", title: "Tool: bash", toolName: "bash", message: "tool result", input: "echo important", output: "important output" });
+			const tracking = renderTracking(job, 120).join("\n");
+			assert.match(tracking, /Tool: read/);
+			assert.doesNotMatch(tracking, /very long read input|very long read output/);
+			assert.match(tracking, /echo important/);
+			assert.match(tracking, /important output/);
+
 			assert.deepEqual(parseDashboardAction("F"), { type: "artifacts" });
 			assert.equal(parseDashboardAction("D"), undefined);
-			assert.equal(parseDashboardAction("L"), undefined);
+			assert.deepEqual(parseDashboardAction("L"), { type: "toggleAutoScroll" });
 			assert.deepEqual(parseDashboardAction("T"), { type: "logs" });
 			assert.deepEqual(parseDashboardAction("G"), { type: "normal" });
 			assert.deepEqual(parseDashboardAction("Q"), { type: "previousMode" });
@@ -217,7 +225,47 @@ describe("blank-slate MVP foundations", () => {
 			assert.match(renderFooterHints(120, undefined, "artifacts").join("\n"), /V.*notes/);
 			assert.doesNotMatch(renderFooterHints(120, undefined, "normal").join("\n"), /approve|deny/);
 			assert.match(renderFooterHints(120, undefined, "normal").join("\n"), /K clear/);
+			assert.match(renderFooterHints(120, undefined, "logs").join("\n"), /L.*auto-scroll/);
+			assert.match(renderFooterHints(120, undefined, "logs").join("\n"), /PgUp\/PgDn.*top\/bottom/);
 			assert.match(renderFooterHints(120, undefined, "approvals").join("\n"), /approve/);
+		} finally {
+			await fsp.rm(cwd, { recursive: true, force: true });
+		}
+	});
+
+	test("dashboard auto-scroll pauses during manual review and can be re-enabled", async () => {
+		const { AgentStore } = await importCompiled("src/agents/agent-store.js");
+		const { Dashboard } = await importCompiled("src/dashboard/Dashboard.js");
+		const cwd = await fsp.mkdtemp(path.join(os.tmpdir(), "dashboard-scroll-"));
+		try {
+			const store = new AgentStore();
+			const job = store.create(cwd, "scroll worker", "produce a long transcript");
+			for (let index = 0; index < 35; index++) store.appendTracking(job.id, { kind: "assistant", title: `entry-${index}`, message: `message-${index}` });
+			const dashboard = new Dashboard(store, { isRunning: () => false, start: async () => undefined, abort: () => undefined }, {
+				createJob: async () => undefined,
+				close: () => undefined,
+				notify: () => undefined,
+				deleteJob: async () => false,
+				clearJob: async () => false,
+				sendMessage: async () => undefined,
+				openArtifactViewer: async () => undefined,
+			}, { requestRender: () => undefined });
+			try {
+				dashboard.handleInput("T");
+				assert.match(dashboard.render(120).join("\n"), /entry-34/);
+
+				await dashboard.handleAction("scrollTop");
+				store.appendTracking(job.id, { kind: "assistant", title: "entry-new", message: "new message while reading older output" });
+				const paused = dashboard.render(120).join("\n");
+				assert.match(paused, /Job created|entry-0/);
+				assert.doesNotMatch(paused, /entry-new/);
+
+				await dashboard.handleAction("toggleAutoScroll");
+				store.appendTracking(job.id, { kind: "assistant", title: "entry-after-enable", message: "new message after enabling auto-scroll" });
+				assert.match(dashboard.render(120).join("\n"), /entry-after-enable/);
+			} finally {
+				dashboard.dispose();
+			}
 		} finally {
 			await fsp.rm(cwd, { recursive: true, force: true });
 		}

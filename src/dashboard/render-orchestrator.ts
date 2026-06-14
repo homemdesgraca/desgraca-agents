@@ -1,7 +1,7 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { AgentJob } from "../agents/agent-job.ts";
 import type { OrchestratorSession, OrchestratorSessionSnapshot, OrchestratorTranscriptEntry } from "../orchestrator/orchestrator-session.ts";
-import { clampLine, formatTime, padLine, renderSectionTitle, wrapPlainLine } from "./render.ts";
+import { clampLine, formatTime, padLine, renderSectionTitle, shouldHideToolDetails, wrapPlainLine } from "./render.ts";
 
 function fg(theme: Theme | undefined, color: Parameters<Theme["fg"]>[0], text: string): string {
 	return theme ? theme.fg(color, text) : text;
@@ -100,12 +100,13 @@ function transcriptKindColor(entry: OrchestratorTranscriptEntry): Parameters<The
 
 function renderTranscriptEntry(entry: OrchestratorTranscriptEntry, width: number, theme?: Theme): string[] {
 	const lines = [clampLine(`${fg(theme, "dim", formatTime(entry.timestamp))} ${fg(theme, transcriptKindColor(entry), bold(theme, entry.title))}`, width)];
-	if (entry.message) lines.push(...entry.message.split("\n").flatMap((line) => wrapWords(line || " ", Math.max(8, width - 2))).map((line) => clampLine(`  ${fg(theme, "toolOutput", line)}`, width)));
-	if (entry.input) {
+	const hideToolDetails = entry.kind === "tool" && shouldHideToolDetails(entry.toolName ?? entry.title);
+	if (entry.message) lines.push(...entry.message.split("\n").flatMap((line) => wrapWords(hideToolDetails ? `${line || " "} (details hidden)` : line || " ", Math.max(8, width - 2))).map((line) => clampLine(`  ${fg(theme, "toolOutput", line)}`, width)));
+	if (!hideToolDetails && entry.input) {
 		lines.push(clampLine(`  ${fg(theme, "dim", "Input:")}`, width));
 		lines.push(...entry.input.split("\n").flatMap((line) => wrapWords(line || " ", Math.max(8, width - 4))).map((line) => clampLine(`    ${fg(theme, "muted", line)}`, width)));
 	}
-	if (entry.output) {
+	if (!hideToolDetails && entry.output) {
 		lines.push(clampLine(`  ${fg(theme, "dim", "Output:")}`, width));
 		lines.push(...entry.output.split("\n").flatMap((line) => wrapWords(line || " ", Math.max(8, width - 4))).map((line) => clampLine(`    ${fg(theme, "toolOutput", line)}`, width)));
 	}

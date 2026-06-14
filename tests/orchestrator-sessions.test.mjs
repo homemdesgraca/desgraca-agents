@@ -38,13 +38,16 @@ describe("orchestrator sessions", () => {
 			transcript: [
 				{ id: "t1", timestamp: 3, kind: "user", title: "User message", message: "please coordinate" },
 				{ id: "t2", timestamp: 4, kind: "tool", title: "Tool: orchestrator_list_agent_statuses", input: "{}", output: "No worker drafts yet." },
-				{ id: "t3", timestamp: 5, kind: "assistant", title: "Assistant response", message: "I will track this like the worker tracking screen." },
+				{ id: "t3", timestamp: 5, kind: "tool", title: "Tool: read", toolName: "read", message: "tool result", input: "large file input", output: "large file output" },
+				{ id: "t4", timestamp: 6, kind: "assistant", title: "Assistant response", message: "I will track this like the worker tracking screen." },
 			],
 		}, 100).join("\n");
 		assert.match(renderedOrchestrator, /Transcript/);
 		assert.match(renderedOrchestrator, /User message/);
 		assert.match(renderedOrchestrator, /Input:/);
 		assert.match(renderedOrchestrator, /Output:/);
+		assert.match(renderedOrchestrator, /Tool: read/);
+		assert.doesNotMatch(renderedOrchestrator, /large file input|large file output/);
 		assert.match(renderedOrchestrator, /Assistant response/);
 	});
 
@@ -258,6 +261,7 @@ describe("orchestrator sessions", () => {
 			const deletedDraft = await store.createOrUpdateDraft(session.id, { name: "Delete Me", task: "temporary worker", order: 6 }, createDefaultSettings());
 			await store.createStartRequest(session.id, { name: "Delete Me", waitForResponse: false });
 			await store.removeLinkedAgent(session.id, deletedDraft.job.id, deletedDraft.draft.id);
+			assert.equal((await store.listDrafts(session.id)).some((draft) => draft.name === "delete-me"), false);
 			await agentStore.delete(deletedDraft.job.id);
 			await store.syncAllDrafts(createDefaultSettings());
 			assert.equal(agentStore.list().some((job) => job.name === "delete-me"), false);

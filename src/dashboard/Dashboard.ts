@@ -55,6 +55,7 @@ export class Dashboard implements Component {
 	private artifactPreviewIndex = 0;
 	private showArtifactNotes = true;
 	private rightScrollOffset = 0;
+	private autoScrollEnabled = true;
 	private notice: { message: string; level: "info" | "warning" | "error" } | undefined;
 	private noticeTimer: ReturnType<typeof setTimeout> | undefined;
 	private cachedWidth: number | undefined;
@@ -74,13 +75,13 @@ export class Dashboard implements Component {
 		private readonly orchestratorRunner?: OrchestratorRunner,
 	) {
 		this.unsubscribe = this.store.subscribe(() => {
-			if (this.mode === "logs") this.rightScrollOffset = Number.MAX_SAFE_INTEGER;
+			if (this.shouldAutoScrollRight()) this.rightScrollOffset = Number.MAX_SAFE_INTEGER;
 			void this.refreshOrchestratorSnapshot();
 			this.invalidate();
 			this.tui.requestRender();
 		});
 		this.orchestratorUnsubscribe = this.orchestratorStore?.subscribe(() => {
-			if (this.mode === "orchestrator") this.rightScrollOffset = Number.MAX_SAFE_INTEGER;
+			if (this.shouldAutoScrollRight()) this.rightScrollOffset = Number.MAX_SAFE_INTEGER;
 			void this.refreshOrchestratorSnapshot();
 			this.invalidate();
 			this.tui.requestRender();
@@ -89,7 +90,7 @@ export class Dashboard implements Component {
 			this.orchestratorRefreshTimer = setInterval(() => {
 				const refresh = this.actions.refreshOrchestratorState?.() ?? this.orchestratorStore!.refresh();
 				void refresh.then(() => {
-					if (this.mode === "orchestrator") this.rightScrollOffset = Number.MAX_SAFE_INTEGER;
+					if (this.shouldAutoScrollRight()) this.rightScrollOffset = Number.MAX_SAFE_INTEGER;
 					return this.refreshOrchestratorSnapshot();
 				}).then(() => this.invalidateAndRender()).catch(() => undefined);
 			}, 1500);
@@ -143,10 +144,25 @@ export class Dashboard implements Component {
 		const job = this.store.getSelected();
 		switch (type) {
 			case "scrollUp":
+				this.autoScrollEnabled = false;
 				this.rightScrollOffset = Math.max(0, this.rightScrollOffset - 1);
 				break;
 			case "scrollDown":
+				this.autoScrollEnabled = false;
 				this.rightScrollOffset += 1;
+				break;
+			case "scrollTop":
+				this.autoScrollEnabled = false;
+				this.rightScrollOffset = 0;
+				break;
+			case "scrollBottom":
+				this.autoScrollEnabled = false;
+				this.rightScrollOffset = Number.MAX_SAFE_INTEGER;
+				break;
+			case "toggleAutoScroll":
+				this.autoScrollEnabled = !this.autoScrollEnabled;
+				if (this.autoScrollEnabled) this.rightScrollOffset = Number.MAX_SAFE_INTEGER;
+				this.showNotice(this.autoScrollEnabled ? "Auto-scroll enabled." : "Auto-scroll disabled.", "info");
 				break;
 			case "create":
 				if (this.mode === "orchestrator") {
@@ -271,11 +287,11 @@ export class Dashboard implements Component {
 				break;
 			case "logs":
 				this.mode = "logs";
-				this.rightScrollOffset = Number.MAX_SAFE_INTEGER;
+				this.rightScrollOffset = this.autoScrollEnabled ? Number.MAX_SAFE_INTEGER : 0;
 				break;
 			case "orchestrator":
 				this.mode = "orchestrator";
-				this.rightScrollOffset = Number.MAX_SAFE_INTEGER;
+				this.rightScrollOffset = this.autoScrollEnabled ? Number.MAX_SAFE_INTEGER : 0;
 				await this.refreshOrchestratorSnapshot();
 				break;
 			case "approvals":
@@ -397,7 +413,11 @@ export class Dashboard implements Component {
 		const current = MODE_ORDER.indexOf(this.mode);
 		const next = (current + delta + MODE_ORDER.length) % MODE_ORDER.length;
 		this.mode = MODE_ORDER[next] ?? "normal";
-		this.rightScrollOffset = this.mode === "logs" ? Number.MAX_SAFE_INTEGER : 0;
+		this.rightScrollOffset = this.shouldAutoScrollRight() ? Number.MAX_SAFE_INTEGER : 0;
+	}
+
+	private shouldAutoScrollRight(): boolean {
+		return this.autoScrollEnabled && (this.mode === "logs" || this.mode === "orchestrator");
 	}
 
 	private agentHasStartedOutput(job: AgentJob): boolean {

@@ -25,10 +25,13 @@ export type DashboardAction =
 	| { type: "artifactNext" }
 	| { type: "artifactOpen" }
 	| { type: "toggleNotes" }
+	| { type: "toggleAutoScroll" }
 	| { type: "scrollUp" }
-	| { type: "scrollDown" };
+	| { type: "scrollDown" }
+	| { type: "scrollTop" }
+	| { type: "scrollBottom" };
 
-export const DASHBOARD_HELP_TEXT = "Mode keys: G/O/T/P/F/H direct, Q/E walk modes. Esc closes.";
+export const DASHBOARD_HELP_TEXT = "Mode keys: G/O/T/P/F/H direct, Q/E walk modes. PgUp/PgDn top/bottom. L toggles auto-scroll. Esc closes.";
 
 export function parseDashboardAction(input: string): DashboardAction | undefined {
 	if (matchesKey(input, "escape") || matchesKey(input, "ctrl+c")) return { type: "close" };
@@ -56,6 +59,9 @@ export function parseDashboardAction(input: string): DashboardAction | undefined
 	if (matchesKey(input, "delete") || matchesKey(input, "backspace")) return { type: "delete" };
 	if (matchesKey(input, "up")) return { type: "scrollUp" };
 	if (matchesKey(input, "down")) return { type: "scrollDown" };
+	if (matchesKey(input, "pageUp")) return { type: "scrollTop" };
+	if (matchesKey(input, "pageDown")) return { type: "scrollBottom" };
+	if (input === "l" || input === "L") return { type: "toggleAutoScroll" };
 	if (input === "r" || input === "R") return { type: "refresh" };
 	return undefined;
 }

@@ -12,6 +12,7 @@ const TRANSCRIPT_FILE = "transcript.jsonl";
 const PLAN_FILE = "plan.md";
 const DRAFTS_FILE = "drafts.json";
 const START_REQUESTS_FILE = "start-requests.json";
+const DELETED_LINKED_AGENTS_FILE = "deleted-linked-agents.json";
 
 export interface CreateOrchestratorSessionInput {
 	title: string;
@@ -34,6 +35,12 @@ export interface CreateStartRequestInput {
 export interface ResolveStartRequestInput {
 	status: "approved" | "denied";
 	denialReason?: string;
+}
+
+interface DeletedLinkedAgentMarker {
+	agentJobId: string;
+	draftId?: string;
+	deletedAt: number;
 }
 
 type StoreListener = () => void;
@@ -213,6 +220,7 @@ export class OrchestratorStore {
 	async removeLinkedAgent(sessionId: string, agentJobId: string, draftId?: string): Promise<void> {
 		const session = this.sessions.get(sessionId);
 		if (!session) return;
+		await this.markLinkedAgentDeleted(session, agentJobId, draftId);
 		const drafts = await this.readDraftsRaw(session);
 		const removedDrafts = drafts.filter((draft) => draft.agentJobId === agentJobId || (!!draftId && draft.id === draftId));
 		if (removedDrafts.length > 0) {
@@ -455,6 +463,10 @@ export class OrchestratorStore {
 		return path.join(this.sessionDir(session.cwd, session.id), DRAFTS_FILE);
 	}
 
+	private deletedLinkedAgentsFile(session: OrchestratorSession): string {
+		return path.join(this.sessionDir(session.cwd, session.id), DELETED_LINKED_AGENTS_FILE);
+	}
+
 	private sortDrafts(drafts: OrchestratorWorkerDraft[]): OrchestratorWorkerDraft[] {
 		return [...drafts].sort((a, b) => a.order - b.order || a.createdAt - b.createdAt);
 	}
@@ -467,14 +479,33 @@ export class OrchestratorStore {
 		await writeJsonFileAtomic(this.draftsFile(session), this.sortDrafts(drafts));
 	}
 
+	private async readDeletedLinkedAgents(session: OrchestratorSession): Promise<DeletedLinkedAgentMarker[]> {
+		const markers = await readJsonFile<DeletedLinkedAgentMarker[]>(this.deletedLinkedAgentsFile(session), []);
+		return Array.isArray(markers) ? markers.filter((marker) => typeof marker.agentJobId === "string") : [];
+	}
+
+	private async writeDeletedLinkedAgents(session: OrchestratorSession, markers: DeletedLinkedAgentMarker[]): Promise<void> {
+		await writeJsonFileAtomic(this.deletedLinkedAgentsFile(session), markers.slice(-1000));
+	}
+
+	private async markLinkedAgentDeleted(session: OrchestratorSession, agentJobId: string, draftId?: string): Promise<void> {
+		const markers = await this.readDeletedLinkedAgents(session);
+		const withoutDuplicate = markers.filter((marker) => marker.agentJobId !== agentJobId && !(draftId && marker.draftId === draftId));
+		await this.writeDeletedLinkedAgents(session, [...withoutDuplicate, { agentJobId, draftId, deletedAt: now() }]);
+	}
+
 	private async repairDraftsFromLinkedJobs(session: OrchestratorSession, drafts: OrchestratorWorkerDraft[]): Promise<{ drafts: OrchestratorWorkerDraft[]; changed: boolean }> {
 		if (drafts.length === 0 && session.status === "idle") return { drafts, changed: false };
+		const deletedMarkers = await this.readDeletedLinkedAgents(session);
+		const deletedDraftIds = new Set(deletedMarkers.flatMap((marker) => marker.draftId ? [marker.draftId] : []));
+		const deletedJobIds = new Set(deletedMarkers.map((marker) => marker.agentJobId));
 		const byDraftId = new Set(drafts.map((draft) => draft.id));
 		const byJobId = new Set(drafts.flatMap((draft) => draft.agentJobId ? [draft.agentJobId] : []));
 		let changed = false;
 		const next = [...drafts];
 		for (const job of this.agentStore.list()) {
 			if (job.source?.kind !== "orchestrator" || job.source.sessionId !== session.id) continue;
+			if (deletedJobIds.has(job.id) || deletedDraftIds.has(job.source.draftId)) continue;
 			if (byDraftId.has(job.source.draftId) || byJobId.has(job.id)) continue;
 			next.push({
 				id: job.source.draftId,
