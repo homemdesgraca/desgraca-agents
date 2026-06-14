@@ -2,6 +2,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { AgentApproval, AgentArtifact, AgentJob, AgentJobSourceMetadata, AgentJobStatus, AgentLogEntry, AgentModelSelection, AgentTrackingEntry } from "./agent-job.ts";
 import { createAgentJob, createId, getAgentsRoot, getAgentWritableRoot, sanitizeAgentName } from "./agent-job.ts";
+import { listApprovalBridgeRecords, resolveApprovalBridgeRecord } from "./approval-bridge.ts";
 
 const JOB_STATE_FILE = "agent-job.json";
 
@@ -235,6 +236,7 @@ export class AgentStore {
 
 	resolveApproval(jobId: string, approvalId: string, status: "approved" | "denied"): AgentApproval | undefined {
 		let resolved: AgentApproval | undefined;
+		const jobBefore = this.jobs.get(jobId);
 		this.update(jobId, (job) => ({
 			...job,
 			pendingApprovals: job.pendingApprovals.map((approval) => {
@@ -243,8 +245,32 @@ export class AgentStore {
 				return resolved;
 			}),
 		}));
-		if (resolved) this.appendLog(jobId, `Approval ${status}: ${resolved.toolName} ${resolved.inputSummary}`);
+		if (resolved) {
+			this.appendLog(jobId, `Approval ${status}: ${resolved.toolName} ${resolved.inputSummary}`);
+			const writableRoot = jobBefore?.writableRoot ?? this.jobs.get(jobId)?.writableRoot;
+			if (writableRoot) void resolveApprovalBridgeRecord(writableRoot, resolved).catch(() => undefined);
+		}
 		return resolved;
+	}
+
+	async syncApprovalBridge(jobId: string): Promise<{ pending: number; changed: boolean }> {
+		const job = this.jobs.get(jobId);
+		if (!job) return { pending: 0, changed: false };
+		const bridged = await listApprovalBridgeRecords(job.writableRoot);
+		if (bridged.length === 0) return { pending: job.pendingApprovals.filter((approval) => approval.status === "pending").length, changed: false };
+		let changed = false;
+		const byId = new Map(job.pendingApprovals.map((approval) => [approval.id, approval]));
+		for (const approval of bridged) {
+			const existing = byId.get(approval.id);
+			if (!existing || existing.status !== approval.status || existing.resolvedAt !== approval.resolvedAt) {
+				byId.set(approval.id, approval);
+				changed = true;
+			}
+		}
+		const merged = Array.from(byId.values()).sort((a, b) => a.createdAt - b.createdAt);
+		const pending = merged.filter((approval) => approval.status === "pending").length;
+		if (changed) this.update(jobId, { pendingApprovals: merged });
+		return { pending, changed };
 	}
 
 	appendArtifact(id: string, artifact: AgentArtifact): AgentArtifact | undefined {
@@ -284,8 +310,8 @@ export class AgentStore {
 			readableRoot: path.resolve(cwd),
 			writableRoot,
 			allowedTools: Array.isArray(job.allowedTools) && job.allowedTools.length > 0
-				? Array.from(new Set([...job.allowedTools, "agent_write_proposal", "agent_edit_proposal", "agent_view_artifacts", "agent_create_note", "agent_edit_note", "agent_view_notes"])).filter((tool) => tool !== "write" && tool !== "edit")
-				: ["read", "grep", "find", "ls", "agent_write_proposal", "agent_edit_proposal", "agent_view_artifacts", "agent_create_note", "agent_edit_note", "agent_view_notes"],
+				? Array.from(new Set([...job.allowedTools, "agent_bash", "agent_write_proposal", "agent_edit_proposal", "agent_view_artifacts", "agent_create_note", "agent_edit_note", "agent_view_notes"])).filter((tool) => tool !== "write" && tool !== "edit" && tool !== "bash")
+				: ["read", "grep", "find", "ls", "agent_bash", "agent_write_proposal", "agent_edit_proposal", "agent_view_artifacts", "agent_create_note", "agent_edit_note", "agent_view_notes"],
 			logs: [...logs, ...restoredLog],
 			tracking: [...tracking, ...restoredLog.map((log) => ({ id: createId(), timestamp: log.timestamp, kind: "status" as const, title: "Restored", message: log.message }))],
 			pendingApprovals: Array.isArray(job.pendingApprovals) ? job.pendingApprovals : [],

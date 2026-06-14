@@ -228,8 +228,8 @@ interface AgentExtensionSettings {
 }
 ```
 
-- `toolPolicies`: Per-tool policies for worker subprocesses. Worker `bash` is exposed when its policy is `allow` or `ask`, and removed when its policy is `deny`.
-- `childRunnerTools`: Base worker subprocess tool list. Normalization includes `bash` and agent-only tools while still excluding generic `write` and `edit`.
+- `toolPolicies`: Per-tool policies for worker subprocesses. Worker shell access is controlled by the `bash` policy, but implemented through the isolated `agent_bash` tool to avoid ordinary pi bash approval extensions.
+- `childRunnerTools`: Base worker subprocess tool list. Normalization includes `agent_bash` and agent-only tools while still excluding generic `bash`, `write`, and `edit`.
 - `agents.defaultModel`: When set to `"default"`, orchestrator-created workers use the same model as their source orchestrator session. When set to a specific model, they use that model.
 - `orchestrator.toolPolicies`: Per-tool policies for orchestrator subprocesses.
 - `orchestrator.runnerTools`: List of tools allowed in orchestrator subprocesses.

@@ -25,10 +25,10 @@ describe("blank-slate MVP foundations", () => {
 		assert.equal(settings.toolPolicies.agent_create_note, "allow");
 		assert.equal(settings.toolPolicies.agent_edit_note, "allow");
 		assert.equal(settings.toolPolicies.agent_view_notes, "allow");
-		assert.deepEqual(settings.childRunnerTools, ["read", "grep", "find", "ls", "bash", "agent_write_proposal", "agent_edit_proposal", "agent_view_artifacts", "agent_create_note", "agent_edit_note", "agent_view_notes"]);
+		assert.deepEqual(settings.childRunnerTools, ["read", "grep", "find", "ls", "agent_bash", "agent_write_proposal", "agent_edit_proposal", "agent_view_artifacts", "agent_create_note", "agent_edit_note", "agent_view_notes"]);
 	});
 
-	test("worker bash tool exposure follows the configured policy", async () => {
+	test("worker bash tool exposure uses isolated agent_bash and follows the configured policy", async () => {
 		const { createDefaultSettings } = await importCompiled("src/settings/settings.js");
 		const { createAgentJob } = await importCompiled("src/agents/agent-job.js");
 		const { getRunnableTools } = await importCompiled("src/agents/agent-runner.js");
@@ -37,11 +37,14 @@ describe("blank-slate MVP foundations", () => {
 			const job = createAgentJob(cwd, "bash worker", "check commands");
 			job.allowedTools = ["read"];
 			const settings = createDefaultSettings();
-			assert.equal(getRunnableTools(job, settings).includes("bash"), true);
+			assert.equal(getRunnableTools(job, settings).includes("bash"), false);
+			assert.equal(getRunnableTools(job, settings).includes("agent_bash"), true);
 			settings.toolPolicies.bash = "allow";
-			assert.equal(getRunnableTools(job, settings).includes("bash"), true);
+			assert.equal(getRunnableTools(job, settings).includes("bash"), false);
+			assert.equal(getRunnableTools(job, settings).includes("agent_bash"), true);
 			settings.toolPolicies.bash = "deny";
 			assert.equal(getRunnableTools(job, settings).includes("bash"), false);
+			assert.equal(getRunnableTools(job, settings).includes("agent_bash"), false);
 		} finally {
 			await fsp.rm(cwd, { recursive: true, force: true });
 		}
@@ -57,7 +60,7 @@ describe("blank-slate MVP foundations", () => {
 			assert.equal(job.readableRoot, path.resolve(cwd));
 			assert.equal(job.writableRoot, path.join(cwd, ".agents", "module-x-worker"));
 			assert.equal(job.status, "draft");
-			assert.deepEqual(job.allowedTools, ["read", "grep", "find", "ls", "bash", "agent_write_proposal", "agent_edit_proposal", "agent_view_artifacts", "agent_create_note", "agent_edit_note", "agent_view_notes"]);
+			assert.deepEqual(job.allowedTools, ["read", "grep", "find", "ls", "agent_bash", "agent_write_proposal", "agent_edit_proposal", "agent_view_artifacts", "agent_create_note", "agent_edit_note", "agent_view_notes"]);
 		} finally {
 			await fsp.rm(cwd, { recursive: true, force: true });
 		}
@@ -134,6 +137,7 @@ describe("blank-slate MVP foundations", () => {
 		const { AgentStore } = await importCompiled("src/agents/agent-store.js");
 		const { createArtifactSuggestion, applyArtifactSuggestion } = await importCompiled("src/agents/artifact-suggestions.js");
 		const { discoverArtifacts, PiSubprocessAgentRunner } = await importCompiled("src/agents/agent-runner.js");
+		const { writeApprovalBridgeRecord } = await importCompiled("src/agents/approval-bridge.js");
 		const { createDefaultSettings } = await importCompiled("src/settings/settings.js");
 		const cwd = await fsp.mkdtemp(path.join(os.tmpdir(), "artifacts-"));
 		try {
@@ -143,6 +147,8 @@ describe("blank-slate MVP foundations", () => {
 			await fsp.writeFile(path.join(job.writableRoot, "proposals", "nested", "notes.md"), "hello");
 			await fsp.writeFile(path.join(job.writableRoot, "notes", "handoff.md"), "note");
 			await fsp.writeFile(path.join(job.writableRoot, "agent-job.json.123.456.uuid.tmp"), "transient state write");
+			await fsp.mkdir(path.join(job.writableRoot, ".agent-approvals"), { recursive: true });
+			await fsp.writeFile(path.join(job.writableRoot, ".agent-approvals", "approval.json"), "hidden approval bridge");
 			await fsp.writeFile(path.join(cwd, "main-project.txt"), "must not be listed");
 			const artifacts = await discoverArtifacts(job);
 			assert.deepEqual(artifacts.map((artifact) => artifact.path), [
@@ -170,8 +176,11 @@ describe("blank-slate MVP foundations", () => {
 			runner.running.set(liveJob.id, { process: { killed: false }, aborted: false });
 			await fsp.mkdir(path.join(liveJob.writableRoot, "notes"), { recursive: true });
 			await fsp.writeFile(path.join(liveJob.writableRoot, "notes", "live.md"), "live note");
+			await writeApprovalBridgeRecord(liveJob.writableRoot, { id: "approval-bridge-1", agentId: liveJob.id, agentName: liveJob.name, toolName: "bash", inputSummary: "echo ok", warnings: [], reason: "Policy requires approval.", status: "pending", createdAt: Date.now() });
 			await runner.refreshArtifactsWhileRunning(liveJob.id);
 			assert.ok(store.get(liveJob.id).artifacts.some((artifact) => artifact.path.endsWith(path.join("notes", "live.md"))));
+			assert.equal(store.get(liveJob.id).artifacts.some((artifact) => artifact.path.includes(".agent-approvals")), false);
+			assert.equal(store.get(liveJob.id).pendingApprovals.some((approval) => approval.id === "approval-bridge-1"), true);
 			runner.running.delete(liveJob.id);
 		} finally {
 			await fsp.rm(cwd, { recursive: true, force: true });
@@ -448,6 +457,7 @@ describe("blank-slate MVP foundations", () => {
 		assert.ok(commands.has("agent-settings"));
 		assert.ok(commands.has("agent-policy-cycle"));
 		assert.ok(handlers.has("tool_call"));
+		assert.equal(tools.has("agent_bash"), false);
 		assert.equal(tools.has("agent_write_proposal"), false);
 		assert.equal(tools.has("agent_edit_proposal"), false);
 		assert.equal(tools.has("agent_view_artifacts"), false);
@@ -467,12 +477,14 @@ describe("blank-slate MVP foundations", () => {
 			process.env.DESGRACA_AGENT_JOB_ID = "agent-1";
 			process.env.DESGRACA_AGENT_NAME = "proposal-worker";
 			process.env.DESGRACA_AGENT_WRITABLE_ROOT = path.join(cwd, ".agents", "proposal-worker");
+			process.env.DESGRACA_AGENT_SETTINGS = JSON.stringify({ toolPolicies: { bash: "allow" } });
 			extension({
 				on: () => {},
 				registerCommand: () => {},
 				registerTool: (spec) => tools.set(spec.name, spec),
 				appendEntry: () => {},
 			});
+			assert.ok(tools.has("agent_bash"));
 			assert.ok(tools.has("agent_write_proposal"));
 			assert.ok(tools.has("agent_edit_proposal"));
 			assert.ok(tools.has("agent_view_artifacts"));
@@ -482,6 +494,8 @@ describe("blank-slate MVP foundations", () => {
 
 			await fsp.mkdir(path.join(cwd, "src"), { recursive: true });
 			await fsp.writeFile(path.join(cwd, "src", "file.ts"), "const value = 1;\n");
+			const bashResult = await tools.get("agent_bash").execute("tool-0", { command: "printf isolated" }, undefined, undefined, { cwd });
+			assert.match(bashResult.content[0].text, /isolated/);
 			await tools.get("agent_write_proposal").execute("tool-1", { originalPath: "src/new.ts", content: "export const value = 2;\n" }, undefined, undefined, { cwd });
 			assert.equal(await fsp.readFile(path.join(cwd, ".agents", "proposal-worker", "proposals", "src", "new.ts"), "utf8"), "export const value = 2;\n");
 			assert.equal(fs.existsSync(path.join(cwd, "src", "new.ts")), false);
@@ -515,11 +529,12 @@ describe("blank-slate MVP foundations", () => {
 			delete process.env.DESGRACA_AGENT_JOB_ID;
 			delete process.env.DESGRACA_AGENT_NAME;
 			delete process.env.DESGRACA_AGENT_WRITABLE_ROOT;
+			delete process.env.DESGRACA_AGENT_SETTINGS;
 			await fsp.rm(cwd, { recursive: true, force: true });
 		}
 	});
 
-	test("agent-only proposal, artifact, and note tools are allowed by default without child UI", async () => {
+	test("agent-only proposal, artifact, note, and bash tools are isolated from child UI approval", async () => {
 		const extension = (await importCompiled("index.js")).default;
 		const handlers = new Map();
 		extension({
@@ -538,6 +553,8 @@ describe("blank-slate MVP foundations", () => {
 			assert.equal(viewResult, undefined);
 			const noteResult = await handlers.get("tool_call")({ toolName: "agent_create_note", input: { name: "handoff" } }, { cwd, hasUI: false });
 			assert.equal(noteResult, undefined);
+			const agentBashResult = await handlers.get("tool_call")({ toolName: "agent_bash", input: { command: "echo ok" } }, { cwd, hasUI: false });
+			assert.equal(agentBashResult, undefined);
 		} finally {
 			delete process.env.DESGRACA_AGENT_JOB_ID;
 			delete process.env.DESGRACA_AGENT_NAME;

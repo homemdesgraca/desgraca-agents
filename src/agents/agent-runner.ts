@@ -8,6 +8,7 @@ import { createId } from "./agent-job.ts";
 import type { AgentStore } from "./agent-store.ts";
 import type { AgentExtensionSettings } from "../settings/settings.ts";
 import { listArtifactSuggestions } from "./artifact-suggestions.ts";
+import { AGENT_APPROVAL_BRIDGE_DIR } from "./approval-bridge.ts";
 
 export interface AgentRunner {
 	start(jobId: string): Promise<void>;
@@ -45,8 +46,8 @@ async function ensureDirectory(dir: string): Promise<void> {
 
 export function getRunnableTools(job: AgentJob, settings: AgentExtensionSettings): string[] {
 	const configured = new Set(job.allowedTools.length > 0 ? job.allowedTools : settings.childRunnerTools);
-	if ((settings.toolPolicies.bash ?? "ask") !== "deny") configured.add("bash");
-	return Array.from(configured).filter((tool) => tool !== "write" && tool !== "edit" && settings.toolPolicies[tool] !== "deny");
+	if ((settings.toolPolicies.bash ?? "ask") !== "deny") configured.add("agent_bash");
+	return Array.from(configured).filter((tool) => tool !== "write" && tool !== "edit" && tool !== "bash" && (tool !== "agent_bash" || (settings.toolPolicies.bash ?? "ask") !== "deny"));
 }
 
 async function walkFiles(root: string, cwd: string, agentId: string): Promise<AgentArtifact[]> {
@@ -59,7 +60,7 @@ async function walkFiles(root: string, cwd: string, agentId: string): Promise<Ag
 			return;
 		}
 		for (const entry of entries) {
-			if (entry.name === "agent-job.json" || entry.name === "artifact-suggestions.json" || (entry.name.startsWith("agent-job.json.") && entry.name.endsWith(".tmp"))) continue;
+			if (entry.name === "agent-job.json" || entry.name === "artifact-suggestions.json" || entry.name === AGENT_APPROVAL_BRIDGE_DIR || (entry.name.startsWith("agent-job.json.") && entry.name.endsWith(".tmp"))) continue;
 			const absolutePath = path.join(current, entry.name);
 			const relativeToWorkspace = path.relative(root, absolutePath);
 			if (relativeToWorkspace === "artifact-suggestions" || relativeToWorkspace.startsWith(`artifact-suggestions${path.sep}`)) continue;
@@ -242,7 +243,7 @@ export class PiSubprocessAgentRunner implements AgentRunner {
 			"Use agent_edit_proposal when you need to derive a proposal from an existing project file with exact oldText/newText replacements. It reads the original, writes an isolated proposal, and never mutates the project file.",
 			"Use agent_view_artifacts to list current isolated artifacts or inspect a specific artifact/proposal diff. If you want to check your generated changes, inspect artifacts with that tool instead of reading the original project file and expecting it to be changed.",
 			"Use agent_create_note, agent_edit_note, and agent_view_notes when you need to record, revise, list, or read notes. The note tools manage note files for you.",
-			"The bash tool is available only when the worker bash policy is allow or ask in /agent-settings; ask mode requires user approval before the command runs.",
+			"Use agent_bash when you need to run shell commands. It is agent-scoped so ordinary pi bash approval extensions do not intercept it, and it follows the worker bash policy from /agent-settings. Ask mode requires dashboard approval before the command runs.",
 			"The user will inspect proposals before applying anything to the real project.",
 			"If you need to change project code, create a proposal with agent_write_proposal or agent_edit_proposal instead of editing the main project directly.",
 			...(hasOrchestratorHandoff ? [
@@ -275,6 +276,12 @@ export class PiSubprocessAgentRunner implements AgentRunner {
 		}
 		running.artifactRefreshInFlight = true;
 		try {
+			const approvals = await this.store.syncApprovalBridge(jobId);
+			const latest = this.store.get(jobId);
+			if (latest && this.running.has(jobId)) {
+				if (approvals.pending > 0 && latest.status !== "blocked") this.store.setStatus(jobId, "blocked");
+				else if (approvals.pending === 0 && latest.status === "blocked") this.store.setStatus(jobId, "running");
+			}
 			this.store.setArtifacts(jobId, await discoverArtifacts(job));
 		} catch (error) {
 			this.store.appendLog(jobId, `Artifact refresh failed: ${error instanceof Error ? error.message : String(error)}`, "warning");

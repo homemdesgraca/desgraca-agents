@@ -5,6 +5,7 @@ import { getSettingsListTheme, withFileMutationQueue } from "@earendil-works/pi-
 import { Container, type SettingItem, SettingsList, Text } from "@earendil-works/pi-tui";
 import { AGENT_SETTINGS_ENV, getAgentProcessEnvContext } from "./src/agents/agent-env.ts";
 import type { AgentArtifact, AgentJob, AgentModelSelection } from "./src/agents/agent-job.ts";
+import { AGENT_BASH_TOOL_NAME, registerAgentBashTool } from "./src/agents/bash-tool.ts";
 import { applyArtifactSuggestion } from "./src/agents/artifact-suggestions.ts";
 import { buildGroupStartPlan, findGroupForJob, type AgentParallelGroup } from "./src/agents/agent-groups.ts";
 import { AgentStore } from "./src/agents/agent-store.ts";
@@ -210,7 +211,10 @@ export default function desgracaAgentsExtension(pi: ExtensionAPI) {
 	const orchestratorRunner = new PiSubprocessOrchestratorRunner(orchestratorStore, () => settings);
 	const agentProcessContext = getAgentProcessEnvContext();
 	const orchestratorProcessContext = getOrchestratorProcessEnvContext();
-	if (agentProcessContext) registerAgentProposalTools(pi);
+	if (agentProcessContext) {
+		registerAgentBashTool(pi);
+		registerAgentProposalTools(pi);
+	}
 	if (orchestratorProcessContext) registerOrchestratorTools(pi);
 
 	function persistSettings(): void {
@@ -267,6 +271,7 @@ export default function desgracaAgentsExtension(pi: ExtensionAPI) {
 
 		const agentContext = getAgentProcessEnvContext();
 		if (!agentContext) return;
+		if (event.toolName === AGENT_BASH_TOOL_NAME) return;
 
 		const selected = store.get(agentContext.id);
 		const scopedAgent = {

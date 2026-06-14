@@ -48,7 +48,7 @@ Only proposal artifacts with an `originalPath` can be accepted into the project.
 
 Permissions are agent-scoped only. The extension does not intercept normal tool calls in the parent pi session.
 
-Default worker policies allow read/search tools and the agent-only proposal, artifact, and note tools. `bash` is included in worker subprocess tool access when its policy is `allow` or `ask`; it defaults to `ask`, so commands require user approval. Setting worker `bash` to `deny` removes it from worker tool access. Generic built-in `write` and `edit` are not exposed to worker agents by the subprocess runner.
+Default worker policies allow read/search tools and the agent-only proposal, artifact, and note tools. Worker bash access is implemented as the isolated `agent_bash` tool, controlled by the worker `bash` policy. When the policy is `allow` or `ask`, workers receive `agent_bash`; in `ask` mode the tool waits for approval through the `/agents` dashboard. When the policy is `deny`, `agent_bash` is removed from worker tool access. Generic built-in `bash`, `write`, and `edit` are not exposed to worker agents by the subprocess runner.
 
 The permission system also enforces simple scope rules:
 

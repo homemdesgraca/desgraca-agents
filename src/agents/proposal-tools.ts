@@ -4,6 +4,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { getAgentProcessEnvContext } from "./agent-env.ts";
+import { AGENT_APPROVAL_BRIDGE_DIR } from "./approval-bridge.ts";
 import { checkAgentReadScope, isPathInside } from "../permissions/scope-guard.ts";
 
 function normalizeOriginalPath(cwd: string, originalPath: string): { absoluteOriginal: string; relativeOriginal: string } {
@@ -78,7 +79,7 @@ async function walkArtifactFiles(root: string): Promise<Array<{ relativePath: st
 			return;
 		}
 		for (const entry of entries) {
-			if (entry.name === "agent-job.json" || entry.name === "agent-job.json.tmp") continue;
+			if (entry.name === "agent-job.json" || entry.name === "agent-job.json.tmp" || entry.name === AGENT_APPROVAL_BRIDGE_DIR) continue;
 			const absolutePath = path.join(current, entry.name);
 			if (entry.isDirectory()) {
 				await walk(absolutePath);

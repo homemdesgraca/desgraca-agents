@@ -156,7 +156,7 @@ Use `/agent-settings` to configure:
 - Orchestrator tool policies.
 - Default agent model for orchestrator-created workers.
 
-Worker `bash` is available to agents when set to `allow` or `ask`. In `ask` mode, each command requires approval before it runs. Setting worker `bash` to `deny` removes bash from the worker subprocess tool list.
+Worker bash access is available through the isolated `agent_bash` tool when worker `bash` is set to `allow` or `ask`. In `ask` mode, each command waits for approval in the `/agents` dashboard before it runs. Setting worker `bash` to `deny` removes `agent_bash` from the worker subprocess tool list. Ordinary pi `bash` is not exposed to workers, so global `toolName === "bash"` approval extensions do not intercept worker shell commands.
 
 The default model setting determines which model orchestrator-created workers use:
 
